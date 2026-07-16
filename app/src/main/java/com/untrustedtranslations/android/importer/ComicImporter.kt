@@ -22,14 +22,15 @@ object ComicImporter {
     suspend fun import(context: Context, uri: Uri): ComicProject = withContext(Dispatchers.IO) {
         val displayName = displayName(context, uri)
         val format = ImportContract.detectFormat(context.contentResolver, uri, displayName)
-        val root = File(context.cacheDir, "projects/${UUID.randomUUID()}").apply { mkdirs() }
+        val projectId = UUID.randomUUID().toString()
+        val root = File(context.filesDir, "projects/$projectId").apply { mkdirs() }
         val pages = when (format) {
             ImportFormat.IMAGE -> listOf(importImage(context, uri, root, displayName))
             ImportFormat.PDF -> importPdf(context, uri, root)
             ImportFormat.CBZ, ImportFormat.ZIP -> importArchive(context, uri, root)
         }
         require(pages.isNotEmpty()) { "No supported images were found in this file." }
-        ComicProject(displayName.substringBeforeLast('.'), format, pages)
+        ComicProject(projectId, displayName.substringBeforeLast('.'), format, pages)
     }
 
     private fun importImage(context: Context, uri: Uri, root: File, name: String): ComicPage {

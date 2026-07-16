@@ -96,7 +96,7 @@ On Windows:
 - [x] Masked, texture-aware local text removal
 - [ ] Optional neural inpainting for highly detailed artwork
 - [x] Automatic initial font/style estimation
-- [ ] Drag and resize text boxes directly on the page preview
+- [x] Drag and resize text boxes directly inside the editor preview
 - [ ] Glossary and translation-memory support
 - [ ] Optional alternative OCR and translation providers
 - [ ] Performance profiling for extremely long comics and webtoons

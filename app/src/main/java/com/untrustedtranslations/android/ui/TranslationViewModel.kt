@@ -112,6 +112,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun previousBlock() { if (selectedBlockIndex > 0) selectedBlockIndex-- }
     fun nextBlock() { if (selectedBlockIndex < (currentPage?.blocks?.lastIndex ?: 0)) selectedBlockIndex++ }
 
+    fun updateBounds(value: RelativeBounds) = editBlock { copy(bounds = value, applied = false) }
     fun updateHorizontal(center: Float) = editBlock { copy(bounds = resizeBounds(bounds, centerX = center), applied = false) }
     fun updateVertical(center: Float) = editBlock { copy(bounds = resizeBounds(bounds, centerY = center), applied = false) }
     fun updateWidth(width: Float) = editBlock { copy(bounds = resizeBounds(bounds, width = width), applied = false) }

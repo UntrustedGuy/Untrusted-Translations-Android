@@ -368,6 +368,8 @@ private fun EditorScreen(vm: TranslationViewModel) {
             Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Text("DRAG TO MOVE - DRAG THE DOT TO RESIZE", color = AppColors.Cyan, style = MaterialTheme.typography.labelMedium)
+            EditableBlockPreview(page, block, vm::updateBounds)
             Text("ORIGINAL OCR — EDIT IF DETECTION IS WRONG", color = AppColors.Muted, style = MaterialTheme.typography.labelMedium)
             OutlinedTextField(
                 value = block.originalText,

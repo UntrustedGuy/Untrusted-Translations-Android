@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:allowBackup="true" android:label="Untrusted Translations" android:theme="@style/Theme.UntrustedTranslations">
+    <application
+        android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="Untrusted Translations"
+        android:roundIcon="@drawable/ic_launcher"
+        android:theme="@style/Theme.UntrustedTranslations">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

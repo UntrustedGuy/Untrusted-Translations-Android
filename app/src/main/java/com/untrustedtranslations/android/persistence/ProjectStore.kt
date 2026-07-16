@@ -23,6 +23,7 @@ object ProjectStore {
         context: Context,
         project: ComicProject,
         script: SourceScript,
+        sourceTag: String,
         targetTag: String,
     ) = withContext(Dispatchers.IO) {
         val root = projectRoot(context, project.id).apply { mkdirs() }
@@ -34,6 +35,7 @@ object ProjectStore {
             put("currentPageIndex", project.currentPageIndex)
             put("updatedAt", System.currentTimeMillis())
             put("sourceScript", script.name)
+            put("sourceLanguageTag", sourceTag)
             put("targetLanguageTag", targetTag)
             put("pages", JSONArray().apply { project.pages.forEach { put(pageToJson(it)) } })
         }
@@ -74,6 +76,10 @@ object ProjectStore {
             sourceScript = enumValueOrDefault(
                 json.optString("sourceScript"),
                 SourceScript.JAPANESE,
+            ),
+            sourceLanguageTag = json.optString(
+                "sourceLanguageTag",
+                enumValueOrDefault(json.optString("sourceScript"), SourceScript.JAPANESE).languageTag,
             ),
             targetLanguageTag = json.optString("targetLanguageTag", "en"),
         )

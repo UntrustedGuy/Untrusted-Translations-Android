@@ -4,8 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.net.Uri
@@ -51,13 +49,7 @@ object PageRenderer {
         )
         if (rect.width() < 2f || rect.height() < 2f) return
 
-        val expansion = (rect.width().coerceAtMost(rect.height()) * .03f).coerceIn(3f, 14f)
-        canvas.drawRoundRect(
-            RectF(rect.left - expansion, rect.top - expansion, rect.right + expansion, rect.bottom + expansion),
-            expansion,
-            expansion,
-            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = sampledBackground(bitmap, rect) },
-        )
+        TextInpainter.erase(bitmap, rect)
 
         val padding = (rect.width() * .06f).coerceAtLeast(4f)
         val textWidth = (rect.width() - padding * 2).toInt().coerceAtLeast(20)
@@ -80,7 +72,7 @@ object PageRenderer {
     }
 
     private fun layout(text: String, width: Int, size: Float, block: TextBlock): StaticLayout {
-        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             color = block.style.textColorArgb.toInt()
             textSize = size
             typeface = typeface(block)
@@ -117,30 +109,5 @@ object PageRenderer {
 
     private fun verticalize(text: String): String = text.lines().joinToString("\n") { line ->
         line.trim().toCharArray().joinToString("\n")
-    }
-
-    private fun sampledBackground(bitmap: Bitmap, rect: RectF): Int {
-        val inset = 2f
-        val points = listOf(
-            rect.left + inset to rect.top + inset,
-            rect.centerX() to rect.top + inset,
-            rect.right - inset to rect.top + inset,
-            rect.left + inset to rect.centerY(),
-            rect.right - inset to rect.centerY(),
-            rect.left + inset to rect.bottom - inset,
-            rect.centerX() to rect.bottom - inset,
-            rect.right - inset to rect.bottom - inset,
-        )
-        val colors = points.map { (x, y) ->
-            bitmap.getPixel(
-                x.toInt().coerceIn(0, bitmap.width - 1),
-                y.toInt().coerceIn(0, bitmap.height - 1),
-            )
-        }
-        return Color.rgb(
-            colors.map(Color::red).sorted()[colors.size / 2],
-            colors.map(Color::green).sorted()[colors.size / 2],
-            colors.map(Color::blue).sorted()[colors.size / 2],
-        )
     }
 }

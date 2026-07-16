@@ -175,6 +175,11 @@ private fun ImportScreen(vm: TranslationViewModel) {
             options = SourceScript.entries.map { it.label },
         ) { label -> vm.selectSourceScript(SourceScript.entries.first { it.label == label }) }
         Selector(
+            label = "Source language",
+            value = languageName(vm.sourceLanguageTag),
+            options = targetTags.map(::languageName),
+        ) { label -> vm.setSourceLanguage(targetTags.first { languageName(it) == label }) }
+        Selector(
             label = "Translate to",
             value = languageName(vm.targetLanguageTag),
             options = targetTags.map(::languageName),

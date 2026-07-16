@@ -26,7 +26,7 @@ The app never changes pages by itself. **Only Save & Next advances to the next p
 
 ## Workflow
 
-1. Choose the source script and target language.
+1. Choose the OCR script, source language, and target language.
 2. Import an image, PDF, CBZ, or ZIP.
 3. Wait while the current page is detected and translated.
 4. Tap **Editor** to review one text region at a time.
@@ -52,8 +52,8 @@ OCR and translation run on the Android device. The app needs internet access to 
 
 ## Current limitations
 
-- Text removal uses local background sampling. It works best on speech bubbles and clean, mostly flat backgrounds; complex art behind text can still need manual cleanup.
-- Font matching is user-controlled rather than automatically inferred from the source artwork.
+- Text removal uses a contrast mask and propagates surrounding texture into detected glyphs. It works best inside speech bubbles; detailed art behind stylized text can still need manual cleanup.
+- Font size, rotation, weight, color, family, and vertical layout receive automatic starting estimates. These are heuristics, not exact source-font identification, and remain fully editable.
 - OCR quality depends on scan quality, text direction, stylization, and the selected source script.
 - Very large PDFs and archives are limited by available device memory and storage.
 - Export is raster-based; editable text layers are preserved in the saved app project, not in exported PDF/CBZ files.
@@ -93,8 +93,9 @@ On Windows:
 - [x] Text bounds and typography editor
 - [x] Undo, redo, autosave, resume, and delete
 - [x] Image, PDF, CBZ, and ZIP export
-- [ ] Higher-quality image inpainting for textured artwork
-- [ ] Automatic font/style estimation
+- [x] Masked, texture-aware local text removal
+- [ ] Optional neural inpainting for highly detailed artwork
+- [x] Automatic initial font/style estimation
 - [ ] Drag and resize text boxes directly on the page preview
 - [ ] Glossary and translation-memory support
 - [ ] Optional alternative OCR and translation providers

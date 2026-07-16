@@ -27,6 +27,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     var recentProjects by mutableStateOf<List<SavedProject>>(emptyList()); private set
     var selectedBlockIndex by mutableStateOf(0); private set
     var sourceScript by mutableStateOf(SourceScript.JAPANESE); private set
+    var sourceLanguageTag by mutableStateOf("ja"); private set
     var targetLanguageTag by mutableStateOf("en"); private set
     var busyMessage by mutableStateOf<String?>(null); private set
     var errorMessage by mutableStateOf<String?>(null); private set
@@ -44,7 +45,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     init { refreshProjects() }
 
-    fun selectSourceScript(value: SourceScript) { sourceScript = value }
+    fun selectSourceScript(value: SourceScript) { sourceScript = value; sourceLanguageTag = value.languageTag }
+    fun setSourceLanguage(value: String) { sourceLanguageTag = value }
     fun setTargetLanguage(value: String) { targetLanguageTag = value }
     fun dismissError() { errorMessage = null }
     fun dismissNotice() { noticeMessage = null }
@@ -63,6 +65,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun resumeProject(saved: SavedProject) {
         project = saved.project
         sourceScript = saved.sourceScript
+        sourceLanguageTag = saved.sourceLanguageTag
         targetLanguageTag = saved.targetLanguageTag
         selectedBlockIndex = 0
         resetHistory()
@@ -76,7 +79,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun processCurrentPage() = viewModelScope.launch {
         val page = currentPage ?: return@launch
         runBusy("Detecting and translating text...") {
-            val blocks = OcrTranslationEngine.process(getApplication(), page, sourceScript, targetLanguageTag)
+            val blocks = OcrTranslationEngine.process(getApplication(), page, sourceScript, sourceLanguageTag, targetLanguageTag)
             recordState()
             replaceCurrentPage(
                 page.copy(renderedSource = page.originalSource, blocks = blocks, processed = true, saved = false),
@@ -137,7 +140,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun translateCurrentBlock() = viewModelScope.launch {
         val block = currentBlock ?: return@launch
         runBusy("Translating selected text...") {
-            val translation = OcrTranslationEngine.translateText(block.originalText, sourceScript.languageTag, targetLanguageTag)
+            val translation = OcrTranslationEngine.translateText(block.originalText, sourceLanguageTag, targetLanguageTag)
             editBlock { copy(translatedText = translation, applied = false) }
         }
     }
@@ -229,7 +232,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private suspend fun saveNow() {
-        project?.let { ProjectStore.save(getApplication(), it, sourceScript, targetLanguageTag) }
+        project?.let { ProjectStore.save(getApplication(), it, sourceScript, sourceLanguageTag, targetLanguageTag) }
         refreshProjectsNow()
     }
 

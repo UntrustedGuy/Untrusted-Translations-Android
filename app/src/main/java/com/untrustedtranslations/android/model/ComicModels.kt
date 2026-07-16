@@ -68,5 +68,6 @@ data class ComicProject(
 data class SavedProject(
     val project: ComicProject,
     val sourceScript: SourceScript,
+    val sourceLanguageTag: String = sourceScript.languageTag,
     val targetLanguageTag: String,
 )

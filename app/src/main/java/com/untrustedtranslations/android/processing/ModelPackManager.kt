@@ -23,6 +23,7 @@ enum class ModelPackId {
     MANGA_OCR_JAPANESE,
     BABERU_OCR_MULTILINGUAL,
     NLLB_TRANSLATION,
+    LOCAL_AI_NLLB,
 }
 
 data class ModelPackInfo(
@@ -50,6 +51,7 @@ private data class PackFile(val name: String, val url: String, val sha256: Strin
 object ModelPackManager {
     private const val RAPID_BASE =
         "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master"
+    private const val LOCAL_AI_BASE = "https://huggingface.co/Xenova/nllb-200-distilled-600M/resolve/main"
     private const val BABERU_BASE = "https://huggingface.co/genshiai-daichi/baberu-ocr/resolve/main"
     private const val MANGA_OCR_BASE =
         "https://huggingface.co/l0wgear/manga-ocr-2025-onnx/resolve/main"
@@ -118,6 +120,12 @@ object ModelPackManager {
             "Manga-OCR Japanese",
             "Vision-transformer (DEiT encoder + BERT decoder) trained on manga. Reads cropped text regions like Gemini - understands the image, not just OCR glyphs. Japanese only.",
             140, 4, "Apache-2.0. Uses DEiT-tiny encoder + BERT decoder. May be slow on older devices.",
+        ),
+        ModelPackInfo(
+            ModelPackId.LOCAL_AI_NLLB,
+            "Local AI (distilled NLLB)",
+            "Distilled NLLB-200 600M-param neural translation. Supports 200+ languages including Japanese, Korean, Chinese, and English. Smaller alternative to full NLLB pack.",
+            600, 4, "CC-BY-NC-4.0. Uses Xenova transformers.js ONNX export. ARM64 only.",
         ),
         ModelPackInfo(
             ModelPackId.NLLB_TRANSLATION,
@@ -294,6 +302,13 @@ object ModelPackManager {
             PackFile("config.json", "$MANGA_OCR_BASE/config.json"),
             PackFile("tokenizer.json", "$MANGA_OCR_BASE/tokenizer.json"),
             PackFile("preprocessor_config.json", "$MANGA_OCR_BASE/preprocessor_config.json"),
+        )
+        ModelPackId.LOCAL_AI_NLLB -> listOf(
+            PackFile("encoder_model.onnx", "/onnx/encoder_model.onnx"),
+            PackFile("decoder_model_merged.onnx", "/onnx/decoder_model_merged.onnx"),
+            PackFile("config.json", "/config.json"),
+            PackFile("generation_config.json", "/generation_config.json"),
+            PackFile("tokenizer.json", "/tokenizer.json"),
         )
         ModelPackId.NLLB_TRANSLATION -> listOf(
             PackFile("NLLB_cache_initializer.onnx", "$NLLB_BASE/NLLB_cache_initializer.onnx"),

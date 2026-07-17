@@ -495,6 +495,9 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             TranslationProvider.NLLB -> NllbTranslationEngine.translate(
                 getApplication(), text, sourceLanguageTag, targetLanguageTag,
             )
+            TranslationProvider.LOCAL_AI -> NllbTranslationEngine.translate(
+                getApplication(), text, sourceLanguageTag, targetLanguageTag,
+            )
             TranslationProvider.GOOGLE_UNOFFICIAL -> RemoteTranslationEngines.unofficialGoogle(
                 text, sourceLanguageTag, targetLanguageTag,
             )

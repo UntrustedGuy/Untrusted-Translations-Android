@@ -270,22 +270,29 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                     getApplication(), page, sourceScript, ocrPack,
                 )
             }
+            val manualBlocks = page.blocks.filter { it.eraseBounds == null }
             val translated = if (
                 (ocrProvider == OcrProvider.GEMINI_FREE &&
                     translationProvider == TranslationProvider.GEMINI_FREE) ||
                 (ocrProvider == OcrProvider.ML_KIT &&
                     translationProvider == TranslationProvider.ML_KIT)
             ) detected else detected.map { block ->
-                block.copy(translatedText = translateWithSelectedProvider(block.originalText))
+                val result = runCatching { translateWithSelectedProvider(block.originalText) }
+                    .getOrElse { error ->
+                        if (errorMessage == null) errorMessage = "Translation failed: ${error.message}"
+                        block.originalText
+                    }
+                block.copy(translatedText = result)
             }
-            val manualBlocks = page.blocks.filter { it.eraseBounds == null }
             recordState()
             replaceCurrentPage(
                 page.copy(renderedSource = page.originalSource, blocks = translated + manualBlocks, processed = true, saved = false),
                 record = false,
             )
-            if (translated.isEmpty()) noticeMessage =
-                "No dialogue or caption text was found. Sound effects are intentionally ignored."
+            if (translated.isEmpty()) {
+                if (errorMessage == null) noticeMessage =
+                    "No dialogue or caption text was found. Sound effects are intentionally ignored."
+            }
         }
         if (translationProvider == TranslationProvider.NLLB) {
             NllbTranslationEngine.release()

@@ -56,7 +56,8 @@ App can also be used to change text on images.
 | PNG, JPEG, WebP | Yes | PNG |
 | PDF | Yes | PDF |
 | CBZ | Yes | CBZ |
-| ZIP of images | Yes | ZIP |
+| ZIP | Yes | ZIP |
+| Folder of images | Yes | Folder |
 
 CBR isn't supported. RAR licensing makes it complicated for an open-source app to bundle.
 

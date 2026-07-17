@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Speech bubble shape -->
+    <path
+        android:fillColor="#9B7BFF"
+        android:pathData="M30,36h48c3.3,0 6,2.7 6,6v22c0,3.3 -2.7,6 -6,6H50l-10,8v-8h-10c-3.3,0 -6,-2.7 -6,-6V42c0,-3.3 2.7,-6 6,-6z" />
+    <!-- Left text line -->
+    <path
+        android:fillColor="#0D0D14"
+        android:pathData="M38,48v3h20v-3H38z" />
+    <!-- Right text line -->
+    <path
+        android:fillColor="#0D0D14"
+        android:pathData="M38,55v3h28v-3H38z" />
+    <!-- Bottom text line (shorter, for ellipsis) -->
+    <path
+        android:fillColor="#63E6D6"
+        android:pathData="M38,62v3h14v-3H38z" />
+    <!-- Decorative dot -->
+    <path
+        android:fillColor="#63E6D6"
+        android:pathData="M68,54m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0" />
+    <path
+        android:fillColor="#63E6D6"
+        android:pathData="M68,62m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0" />
+</vector>

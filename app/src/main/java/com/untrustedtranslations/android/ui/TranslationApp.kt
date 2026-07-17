@@ -30,8 +30,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Redo
-import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -46,7 +46,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -524,7 +524,7 @@ private fun Selector(label: String, value: String, options: List<String>, onSele
             readOnly = true,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { option ->
@@ -559,8 +559,8 @@ private fun PageScreen(vm: TranslationViewModel) {
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = AppColors.Void),
                 actions = {
-                    IconButton(vm::undo, enabled = vm.canUndo) { Icon(Icons.Default.Undo, "Undo") }
-                    IconButton(vm::redo, enabled = vm.canRedo) { Icon(Icons.Default.Redo, "Redo") }
+                    IconButton(vm::undo, enabled = vm.canUndo) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
+                    IconButton(vm::redo, enabled = vm.canRedo) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo") }
                     IconButton(vm::openAiSettings) { Icon(Icons.Default.Settings, "AI and OCR settings") }
                     Spacer(Modifier.width(8.dp))
                 },
@@ -691,8 +691,8 @@ private fun EditorScreen(vm: TranslationViewModel) {
                 title = { Text("Text ${vm.editorPosition + 1} of ${vm.editorBlockCount}") },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = AppColors.Void),
                 actions = {
-                    IconButton(vm::undo, enabled = vm.canUndo) { Icon(Icons.Default.Undo, "Undo") }
-                    IconButton(vm::redo, enabled = vm.canRedo) { Icon(Icons.Default.Redo, "Redo") }
+                    IconButton(vm::undo, enabled = vm.canUndo) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
+                    IconButton(vm::redo, enabled = vm.canRedo) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo") }
                     IconButton(vm::deleteCurrentBlock) { Icon(Icons.Default.Delete, "Delete text block") }
                 },
             )

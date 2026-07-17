@@ -572,6 +572,15 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun returnHome() {
+        if (busyMessage != null || placementUpdating) return
+        save()
+        selectedBlockIndex = 0
+        resetHistory()
+        screen = AppScreen.IMPORT
+        refreshProjects()
+    }
+
     private fun editBlock(transform: TextBlock.() -> TextBlock) {
         val page = currentPage ?: return
         val block = currentBlock ?: return

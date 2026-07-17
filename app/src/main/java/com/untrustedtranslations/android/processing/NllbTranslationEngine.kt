@@ -33,10 +33,18 @@ internal object NllbTranslationEngine {
             require(ModelPackManager.isInstalled(context, pack)) { "The NLLB pack is not installed." }
             val source = languageCode(sourceLanguageTag)
             val target = languageCode(targetLanguageTag)
-            val active = runtime ?: Runtime(context, ModelPackManager.directory(context, pack)).also {
-                runtime = it
+            val active = runtime ?: try {
+                Runtime(context, ModelPackManager.directory(context, pack)).also { runtime = it }
+            } catch (linkError: UnsatisfiedLinkError) {
+                error("NLLB native library not supported on this device architecture (${Build.SUPPORTED_ABIS.joinToString()}).")
+            } catch (initError: Exception) {
+                error("NLLB engine failed to initialize: ${initError.message}")
             }
-            active.translate(text, source, target)
+            try {
+                active.translate(text, source, target)
+            } catch (translateError: Exception) {
+                error("NLLB translation failed: ${translateError.message}")
+            }
         }
     }
 

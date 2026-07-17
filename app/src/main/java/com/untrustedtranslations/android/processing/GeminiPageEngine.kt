@@ -48,11 +48,20 @@ object GeminiPageEngine {
                     val original = item.optString("original").trim()
                     val translated = item.optString("translated").trim()
                     if (original.length < 2 || translated.isBlank()) continue
-                    val eraseBounds = RelativeBounds(
+                    val rawErase = RelativeBounds(
                         (item.optDouble("left") / 1000.0).toFloat().coerceIn(0f, .98f),
                         (item.optDouble("top") / 1000.0).toFloat().coerceIn(0f, .98f),
                         (item.optDouble("right") / 1000.0).toFloat().coerceIn(.02f, 1f),
                         (item.optDouble("bottom") / 1000.0).toFloat().coerceIn(.02f, 1f),
+                    ).normalized()
+                    // Shrink by 6% each side to avoid cutting adjacent bubble artwork
+                    val insetX = (rawErase.right - rawErase.left) * .06f
+                    val insetY = (rawErase.bottom - rawErase.top) * .06f
+                    val eraseBounds = RelativeBounds(
+                        (rawErase.left + insetX).coerceIn(0f, .99f),
+                        (rawErase.top + insetY).coerceIn(0f, .99f),
+                        (rawErase.right - insetX).coerceIn(.01f, 1f),
+                        (rawErase.bottom - insetY).coerceIn(.01f, 1f),
                     ).normalized()
                     if (eraseBounds.right - eraseBounds.left < .01f ||
                         eraseBounds.bottom - eraseBounds.top < .01f

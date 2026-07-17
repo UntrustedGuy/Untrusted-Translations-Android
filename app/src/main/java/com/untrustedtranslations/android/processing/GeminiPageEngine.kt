@@ -67,14 +67,22 @@ object GeminiPageEngine {
                         context, bitmap, pixelBox, original, script, null,
                     )
                     val targetUsesVerticalWriting = targetTag == "ja" || targetTag.startsWith("zh")
-                    // Shrink display bounds only; keep full rawErase for inpainting
-                    val insetX = (rawErase.right - rawErase.left) * .06f
-                    val insetY = (rawErase.bottom - rawErase.top) * .06f
+                    // Moderate shrink for erasing (3%) to avoid cutting bubbles; tighter shrink for display (10%)
+                    val erInsetX = (rawErase.right - rawErase.left) * .03f
+                    val erInsetY = (rawErase.bottom - rawErase.top) * .03f
+                    val eraseBounds = RelativeBounds(
+                        (rawErase.left + erInsetX).coerceIn(0f, .99f),
+                        (rawErase.top + erInsetY).coerceIn(0f, .99f),
+                        (rawErase.right - erInsetX).coerceIn(.01f, 1f),
+                        (rawErase.bottom - erInsetY).coerceIn(.01f, 1f),
+                    ).normalized()
+                    val dispInsetX = (rawErase.right - rawErase.left) * .10f
+                    val dispInsetY = (rawErase.bottom - rawErase.top) * .10f
                     val displayBounds = RelativeBounds(
-                        (rawErase.left + insetX).coerceIn(0f, .99f),
-                        (rawErase.top + insetY).coerceIn(0f, .99f),
-                        (rawErase.right - insetX).coerceIn(.01f, 1f),
-                        (rawErase.bottom - insetY).coerceIn(.01f, 1f),
+                        (rawErase.left + dispInsetX).coerceIn(0f, .99f),
+                        (rawErase.top + dispInsetY).coerceIn(0f, .99f),
+                        (rawErase.right - dispInsetX).coerceIn(.01f, 1f),
+                        (rawErase.bottom - dispInsetY).coerceIn(.01f, 1f),
                     ).normalized()
                     add(TextBlock(
                         id = UUID.randomUUID().toString(),
@@ -83,7 +91,7 @@ object GeminiPageEngine {
                         bounds = translatedBounds(
                             displayBounds, translated, estimated.vertical, targetUsesVerticalWriting,
                         ),
-                        eraseBounds = rawErase,
+                        eraseBounds = eraseBounds,
                         style = estimated.copy(
                             font = if (targetUsesVerticalWriting) estimated.font else FontChoice.MANGA,
                             vertical = estimated.vertical && targetUsesVerticalWriting,

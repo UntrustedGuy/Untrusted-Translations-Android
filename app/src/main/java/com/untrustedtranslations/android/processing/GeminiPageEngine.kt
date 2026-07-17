@@ -54,36 +54,36 @@ object GeminiPageEngine {
                         (item.optDouble("right") / 1000.0).toFloat().coerceIn(.02f, 1f),
                         (item.optDouble("bottom") / 1000.0).toFloat().coerceIn(.02f, 1f),
                     ).normalized()
-                    // Shrink by 6% each side to avoid cutting adjacent bubble artwork
-                    val insetX = (rawErase.right - rawErase.left) * .12f
-                    val insetY = (rawErase.bottom - rawErase.top) * .12f
-                    val eraseBounds = RelativeBounds(
-                        (rawErase.left + insetX).coerceIn(0f, .99f),
-                        (rawErase.top + insetY).coerceIn(0f, .99f),
-                        (rawErase.right - insetX).coerceIn(.01f, 1f),
-                        (rawErase.bottom - insetY).coerceIn(.01f, 1f),
-                    ).normalized()
-                    if (eraseBounds.right - eraseBounds.left < .01f ||
-                        eraseBounds.bottom - eraseBounds.top < .01f
+                    if (rawErase.right - rawErase.left < .01f ||
+                        rawErase.bottom - rawErase.top < .01f
                     ) continue
                     val pixelBox = Rect(
-                        (eraseBounds.left * bitmap.width).toInt(),
-                        (eraseBounds.top * bitmap.height).toInt(),
-                        (eraseBounds.right * bitmap.width).toInt(),
-                        (eraseBounds.bottom * bitmap.height).toInt(),
+                        (rawErase.left * bitmap.width).toInt(),
+                        (rawErase.top * bitmap.height).toInt(),
+                        (rawErase.right * bitmap.width).toInt(),
+                        (rawErase.bottom * bitmap.height).toInt(),
                     )
                     val estimated = LetteringStyleEstimator.estimate(
                         context, bitmap, pixelBox, original, script, null,
                     )
                     val targetUsesVerticalWriting = targetTag == "ja" || targetTag.startsWith("zh")
+                    // Shrink display bounds only; keep full rawErase for inpainting
+                    val insetX = (rawErase.right - rawErase.left) * .06f
+                    val insetY = (rawErase.bottom - rawErase.top) * .06f
+                    val displayBounds = RelativeBounds(
+                        (rawErase.left + insetX).coerceIn(0f, .99f),
+                        (rawErase.top + insetY).coerceIn(0f, .99f),
+                        (rawErase.right - insetX).coerceIn(.01f, 1f),
+                        (rawErase.bottom - insetY).coerceIn(.01f, 1f),
+                    ).normalized()
                     add(TextBlock(
                         id = UUID.randomUUID().toString(),
                         originalText = original,
                         translatedText = translated,
                         bounds = translatedBounds(
-                            eraseBounds, translated, estimated.vertical, targetUsesVerticalWriting,
+                            displayBounds, translated, estimated.vertical, targetUsesVerticalWriting,
                         ),
-                        eraseBounds = eraseBounds,
+                        eraseBounds = rawErase,
                         style = estimated.copy(
                             font = if (targetUsesVerticalWriting) estimated.font else FontChoice.MANGA,
                             vertical = estimated.vertical && targetUsesVerticalWriting,

@@ -34,6 +34,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -62,8 +64,13 @@ fun ManipulablePagePreview(
     onTransformCommitted: (Int, RelativeBounds, Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val bitmap = remember(page.renderedSource) { page.renderedSource.path?.let(BitmapFactory::decodeFile) }
+    var bitmap by remember(page.renderedSource) { mutableStateOf<android.graphics.Bitmap?>(null) }
     val context = LocalContext.current
+    LaunchedEffect(page.renderedSource) {
+        withContext(Dispatchers.IO) {
+            val bmp = page.renderedSource.path?.let(BitmapFactory::decodeFile); bitmap = bmp
+        }
+    }
     val mangaFont = remember {
         FontFamily(Typeface.createFromAsset(context.assets, "fonts/comic_neue_bold.ttf"))
     }
@@ -89,13 +96,14 @@ fun ManipulablePagePreview(
             .border(1.dp, Color(0xFF343240), shape),
     ) {
         if (bitmap != null) {
+            val bmp = bitmap!!
             Box(
                 Modifier.fillMaxSize().padding(6.dp)
                     .onSizeChanged { viewport = it }
                     .pointerInput(page.blocks, selectedBlockIndex, mode, viewport) {
                         detectDragGestures(
                             onDragStart = { pointer ->
-                                val geometry = pageImageGeometry(viewport, bitmap.width, bitmap.height)
+                                val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
                                 val currentBlock = page.blocks.getOrNull(selectedBlockIndex)
                                 val currentRect = currentBlock?.bounds?.toPageRect(geometry)
                                 val handleRadius = 32.dp.toPx()
@@ -132,7 +140,7 @@ fun ManipulablePagePreview(
                             onDrag = { change, amount ->
                                 if (dragHandle == PageDragHandle.NONE) return@detectDragGestures
                                 change.consume()
-                                val geometry = pageImageGeometry(viewport, bitmap.width, bitmap.height)
+                                val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
                                 val dx = amount.x / geometry.width.coerceAtLeast(1f)
                                 val dy = amount.y / geometry.height.coerceAtLeast(1f)
                                 draftBounds = when (dragHandle) {
@@ -169,14 +177,14 @@ fun ManipulablePagePreview(
                     },
             ) {
                 Image(
-                    bitmap.asImageBitmap(),
+                    bmp.asImageBitmap(),
                     contentDescription = "Manga page with movable text",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit,
                 )
                 val liveBlock = page.blocks.getOrNull(activeIndex)
                 if (previewPending && liveBlock?.applied == true && viewport != IntSize.Zero) {
-                    val geometry = pageImageGeometry(viewport, bitmap.width, bitmap.height)
+                    val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
                     val oldRect = liveBlock.bounds.toPageRect(geometry)
                     val liveRect = draftBounds.toPageRect(geometry)
                     val density = LocalDensity.current
@@ -184,7 +192,7 @@ fun ManipulablePagePreview(
                     val liveHeight = with(density) { liveRect.height.toDp() }
                     val sourceHeight = (liveBlock.bounds.bottom - liveBlock.bounds.top).coerceAtLeast(.001f)
                     val draftHeight = (draftBounds.bottom - draftBounds.top).coerceAtLeast(.001f)
-                    val displayScale = geometry.width / bitmap.width.coerceAtLeast(1)
+                    val displayScale = geometry.width / bmp.width.coerceAtLeast(1)
                     val liveFontSizeSp = liveBlock.style.fontSizeSp * (draftHeight / sourceHeight) * displayScale
                     if (oldRect != liveRect) {
                         Box(
@@ -228,8 +236,8 @@ fun ManipulablePagePreview(
                 Canvas(Modifier.fillMaxSize()) {
                     val geometry = pageImageGeometry(
                         IntSize(size.width.toInt(), size.height.toInt()),
-                        bitmap.width,
-                        bitmap.height,
+                        bmp.width,
+                        bmp.height,
                     )
                     page.blocks.forEachIndexed { index, block ->
                         val isSelected = index == activeIndex && block.applied

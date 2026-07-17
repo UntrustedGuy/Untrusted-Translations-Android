@@ -21,6 +21,7 @@ enum class ModelPackId {
     RAPID_OCR_V5_CHINESE,
     RAPID_OCR_V5_LATIN,
     MANGA_OCR_JAPANESE,
+    BABERU_OCR_MULTILINGUAL,
     NLLB_TRANSLATION,
 }
 
@@ -49,6 +50,7 @@ private data class PackFile(val name: String, val url: String, val sha256: Strin
 object ModelPackManager {
     private const val RAPID_BASE =
         "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master"
+    private const val BABERU_BASE = "https://huggingface.co/genshiai-daichi/baberu-ocr/resolve/main"
     private const val MANGA_OCR_BASE =
         "https://huggingface.co/l0wgear/manga-ocr-2025-onnx/resolve/main"
     private const val HF_BASE =
@@ -104,6 +106,18 @@ object ModelPackManager {
             "RapidOCR PP-OCRv5 Latin",
             "Full PP-OCRv5 detection and recognition models from HuggingFace for Latin-script comics.",
             16, 2, "Apache-2.0; HuggingFace monkt/paddleocr-onnx.",
+        ),
+        ModelPackInfo(
+            ModelPackId.BABERU_OCR_MULTILINGUAL,
+            "Baberu OCR Multilingual",
+            "Vision-transformer (DINOv2 encoder, 6-layer decoder). Supports Japanese, Chinese, and English from a single 115M-param checkpoint. Trained for manga speech bubbles; beats manga-ocr on Japanese.",
+            121, 3, "Apache-2.0. ONNX int4 vision + int8 decoder. User must supply a text-detection stage via RapidOCR packs.",
+        ),
+        ModelPackInfo(
+            ModelPackId.MANGA_OCR_JAPANESE,
+            "Manga-OCR Japanese",
+            "Vision-transformer (DEiT encoder + BERT decoder) trained on manga. Reads cropped text regions like Gemini - understands the image, not just OCR glyphs. Japanese only.",
+            140, 4, "Apache-2.0. Uses DEiT-tiny encoder + BERT decoder. May be slow on older devices.",
         ),
         ModelPackInfo(
             ModelPackId.NLLB_TRANSLATION,
@@ -264,6 +278,15 @@ object ModelPackManager {
             PackFile("det.onnx", "$HF_BASE/detection/v5/det.onnx"),
             PackFile("rec.onnx", "$HF_BASE/languages/latin/rec.onnx"),
             PackFile("keys.txt", "$HF_BASE/languages/latin/dict.txt"),
+        )
+        ModelPackId.BABERU_OCR_MULTILINGUAL -> listOf(
+            PackFile("vision_int4.onnx", "$BABERU_BASE/onnx/vision_int4.onnx"),
+            PackFile("decoder_prefill_int8.onnx", "$BABERU_BASE/onnx/decoder_prefill_int8.onnx"),
+            PackFile("decoder_step_int8.onnx", "$BABERU_BASE/onnx/decoder_step_int8.onnx"),
+            PackFile("config.json", "$BABERU_BASE/config.json"),
+            PackFile("generation_config.json", "$BABERU_BASE/generation_config.json"),
+            PackFile("vocab.json", "$BABERU_BASE/tokenizer/vocab.json"),
+            PackFile("tokenizer_config.json", "$BABERU_BASE/tokenizer/tokenizer_config.json"),
         )
         ModelPackId.MANGA_OCR_JAPANESE -> listOf(
             PackFile("encoder_model.onnx", "$MANGA_OCR_BASE/encoder_model.onnx"),

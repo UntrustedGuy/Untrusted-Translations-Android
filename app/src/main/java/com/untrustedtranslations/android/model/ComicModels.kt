@@ -10,12 +10,13 @@ enum class OcrProvider(val label: String) {
     RAPID_OCR("RapidOCR pack (download)"),
     RAPID_OCR_V5("RapidOCR PP-OCRv5 (download / experimental)"),
     MANGA_OCR("Manga-OCR (download / experimental / Japanese)"),
+    MANGA_OCR_MULTI("Manga-OCR Multi (download / experimental / JPN+CHN+ENG)"),
 }
 
 enum class TranslationProvider(val label: String, val paid: Boolean = false) {
     GEMINI_FREE("Gemini Free (online)"),
     ML_KIT("Google ML Kit (offline)"),
-    NLLB("NLLB high quality (download)"),
+    NLLB("Local AI (NLLB high quality / download)"),
     OPENAI("OpenAI API (paid)", paid = true),
     GOOGLE_UNOFFICIAL("Google Translate (unofficial / experimental)"),
     ANTHROPIC("Claude API (paid)", paid = true),

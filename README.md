@@ -1,175 +1,154 @@
 # Untrusted Translations
 
-> A dark, mobile-first, computer-aided manga and comic translation editor for Android.
+A translation workspace for Android that actually respects your time. Import a comic or a single page, let the app find the text, fix what the machine got wrong, and replace the original lettering — all on your phone.
 
-Untrusted Translations turns your phone into a focused comic translation workspace. Import a complete comic or a single image, detect text on the current page, review the OCR and machine translation against the original, correct the wording, then replace the original lettering on the image with a styled translation.
+The app never turns the page on its own. **You decide when to move forward. Tap Save & Next when you're ready.**
 
-The app never changes pages by itself. **Only Save & Next advances to the next page.**
+---
 
-## Features
+## What's here
 
-### Import
-- Import single images (PNG, JPEG, WebP), multi-page PDFs, CBZ comic archives, and ZIP files.
-- Import an entire folder of images directly from the file picker.
-- Natural filename sorting (`page-02` before `page-10`).
-- 1000-page limit per archive; each extracted page is checked for size and safety.
+- **Import** PNG, JPEG, WebP, PDF, CBZ, or ZIP files through the system file picker. Archives are sorted naturally (page 2 comes before page 10).
+- **PDF support** — renders PDFs into editable page images.
+- **6 different OCR engines** — pick what works for your comic:
+  - Gemini Free — reads the whole page like a person would, ignores sound effects
+  - Google ML Kit — built-in, no downloads, good enough for clean print
+  - RapidOCR — neural OCR you download as a small pack (Japanese, Korean, Chinese, or Latin)
+  - PP-OCRv5 — same idea but newer models from HuggingFace
+  - Manga-OCR — a vision transformer made for manga, Japanese only
+  - Baberu OCR — multilingual vision transformer for Japanese, Chinese, and English (experimental)
+- **8 translation options** — from offline to paid APIs:
+  - Gemini Free — context-aware, keeps names and tone in mind
+  - Google ML Kit — fast, offline, ~180 languages
+  - NLLB — high-quality neural translation, fully offline (~950 MB, ARM64 only)
+  - Local AI — a smaller distilled NLLB model
+  - Google Translate (unofficial) — experimental, no key needed, might break
+  - OpenAI API — bring your own key (costs money)
+  - Claude API — bring your own key (costs money)
+  - Custom API — any OpenAI-compatible endpoint
+- **Sound effects are intentionally ignored.** Nobody wants SFX detected.
+- **Everything is editable** — wrong OCR text, bad translation, font, size, rotation, alignment, color, bold, italic, vertical layout.
+- **Move, resize, rotate** each text box directly on the page.
+- **Undo and redo** in the editor.
+- **Autosave** — pick up where you left off, or delete old projects.
+- **Export** keeps the original format: PNG stays PNG, PDF stays PDF, etc.
+- **Home button** in the page viewer to jump back to your project list.
 
-### Text detection (OCR)
-| Engine | Quality | Cost |
-|---|---|---|
-| **Gemini Free** | Best — reads the whole page with context, ignores SFX. Requires a free Gemini API key. | Free (quota-based) |
-| **RapidOCR** | Excellent — on-device neural OCR for Japanese, Korean, Chinese, and Latin. Downloadable model packs (~16–18 MB each). | Free (download required) |
-| **Google ML Kit** | Good for clean print. Built-in, no download needed. | Free (always available) |
+---
 
-- Deep scan mode for difficult text.
-- Sound effects are intentionally excluded from detection.
-- Automatic sound-effect rejection by character repetition, rotation, and length heuristics.
-- Overlapping detection merging with long-text deduplication.
+## Quick start
 
-### Translation
-| Engine | Quality | Cost |
-|---|---|---|
-| **Gemini Free** | Context-aware, respects names and tone. Requires a free Gemini API key. | Free (quota-based) |
-| **NLLB (offline)** | High-quality on-device neural translation. ~950 MB download, ARM64 only. | Free (download required) |
-| **Google ML Kit** | Fast on-device, ~180 languages. | Free (always available) |
-| **Google Translate (Unofficial)** | Experimental. No key needed. May stop working without notice. | Free (experimental) |
-| **OpenAI API** | Connect your own paid key (gpt-5-mini). | Paid (your key) |
-| **Claude API** | Connect your own paid key (claude-sonnet-4-5). | Paid (your key) |
-| **Custom OpenAI-compatible** | Bring your own endpoint, key, and model name. | Paid (your server) |
+1. Pick the source script, source language, and target language on the import screen.
+2. Tap the gear icon to choose your OCR and translation engines. Download any model packs you want.
+3. Import a file or folder.
+4. The app detects and translates the current page.
+5. Tap **Editor** to check each text block one at a time.
+6. Fix whatever the machine messed up. Tweak the style.
+7. Tap **Apply** to put the translated text on the page.
+8. **Save & Next** moves you forward. On the last page, **Save & Exit** exports and sends you home.
 
-### Editor
-- Review one detected text region at a time.
-- Edit incorrect OCR text directly.
-- Machine-translated text is fully editable.
-- Re-translate a single block without re-running OCR for the whole page.
-- Adjust font, size, rotation, alignment, bold, italic, vertical layout, and text color.
-- Add new text blocks from scratch with configurable background.
-- Delete unwanted blocks.
-- Undo/redo for all editor changes (50-state history).
+---
 
-### Page canvas
-- Drag text boxes to reposition them directly on the image.
-- Resize by dragging edge handles (left, top, right, bottom).
-- Rotate with a dedicated rotation handle.
-- Live preview of the translated text overlaid on the image.
-- Automatic font-size scaling when text boxes are resized.
-- The page re-renders with updated placement after each change.
+## Import / export
 
-### Text removal (inpainting)
-- Contrast-based glyph detection using the speech bubble's border color as reference.
-- Texture-aware fill propagates surrounding artwork into removed areas.
-- Dilated removal mask covers anti-aliased glyph edges.
-- No external ML model needed — runs on-device instantly.
-
-### Lettering style estimation
-- Automatically detects text color (black vs. white / dark vs. light).
-- Estimates base font size from bounding-box height.
-- Detects CJK vertical writing direction.
-- Chooses between Sans, Condensed, and Casual font families.
-- Detects bold weight from ink density.
-- Estimates rotation from OCR corner points.
-
-### Export
 | Format | Import | Export |
-|---|---|---|
+|--------|--------|--------|
 | PNG, JPEG, WebP | Yes | PNG |
 | PDF | Yes | PDF |
 | CBZ | Yes | CBZ |
 | ZIP of images | Yes | ZIP |
 
-- Exported files go to `Downloads/Untitled Translations` (Android Q+).
+CBR isn't supported. RAR licensing makes it complicated for an open-source app to bundle.
 
-### Projects
-- Autosave with 300 ms debounce.
-- Project library: resume or delete saved projects.
-- JSON-based metadata + per-page rendered images stored in app-private storage.
-- Non-destructive workflow — the original import is never overwritten.
-
-### Security
-- All API keys (Gemini, OpenAI, Claude, custom) are encrypted at rest using Android Keystore AES-GCM.
-- Keys are stored per-user in private app preferences; the app ships with no bundled API key.
-- Remove / switch account by deleting the stored key in AI settings.
-
-## Workflow
-
-1. Open the app — choose the OCR script, source language, and target language.
-2. Tap **AI settings** to select your preferred OCR and translation providers. For Gemini, paste a free API key from Google AI Studio (keep billing disabled).
-3. Import an image, PDF, CBZ, ZIP, or image folder.
-4. Wait while the current page is detected and translated.
-5. Tap **Editor** to review one text region at a time.
-6. Correct the original OCR or translated wording.
-7. Adjust the text box and lettering style, then tap **Replace original text on page**.
-8. Tap **Save & Next** only when you want to move forward to the next page.
-9. On the final page, tap **Save & Exit** to export the translated comic and return to the project library.
+---
 
 ## Privacy
 
-- OCR and translation run either on-device (ML Kit, RapidOCR, NLLB) or through a provider you explicitly configure (Gemini, OpenAI, Claude, custom).
-- The app ships with no bundled API keys and no telemetry.
-- Imported comics and saved projects stay in the app's private storage unless the user exports them.
-- Internet access is required only for Gemini OCR/translation, API-based providers, and downloading optional model packs.
+Most of the processing happens on your device. Online providers (Gemini, OpenAI, Claude) send images or text to their servers — but only if you bring your own API key. The app ships with **zero embedded keys**. Your keys are stored encrypted and you can delete them whenever you want.
 
-## Build
+Downloadable model packs (RapidOCR, PP-OCRv5, Manga-OCR, Baberu, NLLB, Local AI) are fully offline. No data leaves your phone when using those.
 
-Requires Android SDK 36 and Java 17.
+**The app never silently switches to a paid service.** You have to explicitly turn those on.
+
+---
+
+## What it can't do (yet)
+
+- Text removal uses a contrast mask and blends surrounding pixels. Works fine inside speech bubbles, but detailed art behind text can still look rough.
+- Font heuristics are guesses, not exact matches. You can always tweak them.
+- OCR quality varies by scan quality, text direction, and stylization. Different engines handle different comics better.
+- Big PDFs and archives depend on how much RAM your device has.
+- Export is raster-based. The editable text layers are only inside the app's saved projects, not in the exported files.
+- Model packs need a stable connection while downloading. NLLB needs ~6 GB RAM and an ARM64 chip.
+
+---
+
+## Building
+
+Gradle wrapper is included. You need Android SDK 36 and Java 17.
 
 ```bash
 ./gradlew assembleDebug
 ```
+
 On Windows:
+
 ```powershell
 .\gradlew.bat assembleDebug
 ```
 
-The debug APK is signed with the default debug keystore. For a release build, configure signing in `app/build.gradle.kts`.
+---
 
-## Architecture
+## How it's put together
 
-- **Language:** Kotlin
-- **UI:** Jetpack Compose + Material 3 dark theme
-- **State:** Android ViewModel with coroutines
-- **OCR:** Google ML Kit (`com.google.mlkit:text-recognition*`), Gemini 2.5 Flash API, RapidOCR via ONNX Runtime
-- **Translation:** Google ML Kit Translate, Gemini API, NLLB-200 via ONNX (RTranslator tokenizer), Google Translate unofficial endpoint, OpenAI Responses API, Anthropic Messages API, custom OpenAI-compatible API
-- **Inpainting:** Custom flood-fill + texture propagation (no external model)
-- **Font rendering:** Canvas + StaticLayout, Comic Neue Bold for manga lettering
-- **Export:** Android PdfRenderer, PdfDocument, ZipOutputStream, MediaStore
-- **Persistence:** JSON project metadata, Android Keystore for secrets
+- Kotlin + Jetpack Compose — all dark UI
+- ViewModel for screen state and project state
+- Storage Access Framework for file imports
+- ML Kit for baseline OCR and translation
+- Provider pattern for pluggable OCR and translation backends
+- ONNX Runtime for on-device neural models (RapidOCR, PP-OCRv5, Manga-OCR, Baberu)
+- RTranslator's optimized NLLB decoder for offline translation
+- ModelPackManager handles downloads and verifies SHA-256 checksums
+- PdfRenderer for PDF pages
+- EncryptedSharedPreferences for API keys
+- JSON project metadata with per-page files in private storage
+- Original pages are never overwritten
+
+---
+
+## What's next
+
+- [x] Gradle build, launcher icon
+- [x] Import PNG, JPEG, WebP, PDF, CBZ, ZIP
+- [x] Natural archive sorting
+- [x] OCR + translation per page
+- [x] Editable text review
+- [x] Manual page navigation
+- [x] Text box editing (position, size, rotation, font, color, etc.)
+- [x] Undo, redo, autosave, resume, delete
+- [x] Export in original format
+- [x] Local text removal with texture blending
+- [ ] Neural inpainting for tricky artwork
+- [x] Font and style estimation
+- [x] Drag, resize, rotate text boxes on the page
+- [x] Multiple OCR providers (Gemini, ML Kit, RapidOCR, PP-OCRv5, Manga-OCR, Baberu)
+- [x] Multiple translation providers (Gemini, ML Kit, NLLB, Local AI, OpenAI, Claude, Custom API)
+- [x] Downloadable model packs with integrity checks
+- [x] Tier labels (LOW / MID / HIGH) in the provider picker
+- [x] Sound effects excluded by default
+- [x] Home button in the page viewer
+- [ ] Glossary and translation memory
+- [ ] Performance logging for long comics
+- [ ] Automated UI tests
+
+---
+
+## Credits
+
+The workflow borrows ideas from [ImageTrans](https://www.basiccat.org/imagetrans/) and [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator). This is an original Android implementation, not a port.
+
+---
 
 ## License
 
-See [LICENSE](LICENSE). This project incorporates:
-- **Comic Neue** font under the SIL Open Font License.
-- **RTranslator** tokenizer code (NieRTranslator) under Apache 2.0.
-- **ONNX Runtime** for Android under the MIT License.
-- **RapidOCR / PaddleOCR** models used under their respective licenses; models are downloaded separately and not bundled in the APK.
-
-Users are responsible for having the right to translate and redistribute the material they process. Machine-translated releases should be clearly labeled when they have not received human proofreading.
-
-## Roadmap
-
-- [x] Gradle Android project with custom launcher icon
-- [x] Image, PDF, CBZ, ZIP, and folder import
-- [x] Natural archive page ordering
-- [x] ML Kit OCR (Latin, Japanese, Korean, Chinese)
-- [x] ML Kit on-device translation (~180 languages)
-- [x] Editable OCR and translation review flow
-- [x] Manual Save & Next navigation
-- [x] Text bounds and typography editor (font, size, rotation, color, alignment, bold, italic, vertical)
-- [x] Undo, redo, autosave, resume, and delete projects
-- [x] Image, PDF, CBZ, and ZIP export
-- [x] Contrast-mask inpainting for text removal
-- [x] Automatic font/style estimation from source text
-- [x] Drag, resize, and rotate text boxes on the page canvas
-- [x] Gemini Free whole-page OCR + translation
-- [x] RapidOCR on-device neural detection (downloadable packs)
-- [x] NLLB high-quality offline translation (downloadable pack)
-- [x] Google Translate unofficial (experimental, free)
-- [x] OpenAI, Anthropic, and custom API providers
-- [x] Encrypted API key storage with Android Keystore
-- [ ] Glossary and translation-memory support
-- [ ] Batch translate all remaining pages
-- [ ] Performance profiling for extremely long comics and webtoons
-
-## Inspiration
-
-The workflow is informed by [ImageTrans](https://www.basiccat.org/imagetrans/) and [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator). This repository is an original Android implementation and does not copy their source code.
+See [LICENSE](LICENSE). You're responsible for having the right to translate whatever you throw at this. If you publish machine-translated work, label it clearly.

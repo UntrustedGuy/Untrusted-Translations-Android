@@ -629,6 +629,15 @@ private fun PageScreen(vm: TranslationViewModel) {
                     modifier = Modifier.weight(1f),
                     enabled = project.currentPageIndex > 0 && !vm.placementUpdating,
                 ) { Text("Previous page") }
+                OutlinedButton(
+                    vm::returnHome,
+                    modifier = Modifier.weight(1f),
+                    enabled = !vm.placementUpdating,
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
+                    Spacer(Modifier.width(5.dp))
+                    Text("Home")
+                }
                 Button(
                     onClick = { if (vm.isLastPage) vm.saveAndExit() else vm.saveAndNext() },
                     modifier = Modifier.weight(1f),

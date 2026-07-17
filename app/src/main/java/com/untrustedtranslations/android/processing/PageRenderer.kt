@@ -50,18 +50,22 @@ object PageRenderer {
         if (rect.width() < 2f || rect.height() < 2f) return
 
         block.eraseBounds?.let { erase ->
-            TextInpainter.erase(
-                bitmap,
-                RectF(
+            try {
+                val eraseRect = RectF(
                     erase.left * bitmap.width,
                     erase.top * bitmap.height,
                     erase.right * bitmap.width,
                     erase.bottom * bitmap.height,
-                ),
-            )
+                )
+                if (eraseRect.width() >= 3f && eraseRect.height() >= 3f) {
+                    TextInpainter.erase(bitmap, eraseRect)
+                }
+            } catch (_: Exception) { }
         }
 
         val padding = (rect.width() * .06f).coerceAtLeast(4f)
+        val contentHeight = rect.height() - padding * 2
+        if (contentHeight < 4f) return
         val textWidth = (rect.width() - padding * 2).toInt().coerceAtLeast(20)
         val renderText = if (block.style.vertical) verticalize(block.translatedText) else block.translatedText
         var textSize = TypedValue.applyDimension(
@@ -84,8 +88,11 @@ object PageRenderer {
                 android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = background.toInt() },
             )
         }
-        canvas.translate(rect.left + padding, rect.centerY() - textLayout.height / 2f)
-        textLayout.draw(canvas)
+        val textY = rect.centerY() - textLayout.height / 2f
+        canvas.translate(rect.left + padding, textY)
+        try {
+            textLayout.draw(canvas)
+        } catch (_: Exception) { }
         canvas.restore()
     }
 

@@ -55,8 +55,8 @@ object GeminiPageEngine {
                         (item.optDouble("bottom") / 1000.0).toFloat().coerceIn(.02f, 1f),
                     ).normalized()
                     // Shrink by 6% each side to avoid cutting adjacent bubble artwork
-                    val insetX = (rawErase.right - rawErase.left) * .06f
-                    val insetY = (rawErase.bottom - rawErase.top) * .06f
+                    val insetX = (rawErase.right - rawErase.left) * .12f
+                    val insetY = (rawErase.bottom - rawErase.top) * .12f
                     val eraseBounds = RelativeBounds(
                         (rawErase.left + insetX).coerceIn(0f, .99f),
                         (rawErase.top + insetY).coerceIn(0f, .99f),

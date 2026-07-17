@@ -246,6 +246,14 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             errorMessage = "Download the ${ModelPackManager.info(ocrPack).title} pack first."
             return@launch
         }
+        if (ocrProvider == OcrProvider.MANGA_OCR && sourceScript != SourceScript.JAPANESE) {
+            errorMessage = "Manga-OCR is currently Japanese-only. Choose a different script or OCR engine."
+            return@launch
+        }
+        if (ocrProvider == OcrProvider.MANGA_OCR && !isPackInstalled(ModelPackId.MANGA_OCR_JAPANESE)) {
+            errorMessage = "Download the Manga-OCR Japanese pack first."
+            return@launch
+        }
         if (translationProvider == TranslationProvider.NLLB &&
             !isPackInstalled(ModelPackId.NLLB_TRANSLATION)
         ) {
@@ -256,6 +264,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             OcrProvider.GEMINI_FREE -> "Detecting dialogue with Gemini..."
             OcrProvider.RAPID_OCR -> "Detecting dialogue with RapidOCR..."
             OcrProvider.RAPID_OCR_V5 -> "Detecting dialogue with PP-OCRv5..."
+            OcrProvider.MANGA_OCR -> "Reading page with Manga-OCR (vision transformer)..."
             OcrProvider.ML_KIT -> if (deepScan) "Deep scanning dialogue..." else "Detecting dialogue..."
         }
         perf.start()
@@ -273,6 +282,9 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 OcrProvider.RAPID_OCR,
                 OcrProvider.RAPID_OCR_V5 -> RapidOcrPageEngine.process(
                     getApplication(), page, sourceScript, ocrPack,
+                )
+                OcrProvider.MANGA_OCR -> MangaOcrPageEngine.process(
+                    getApplication(), page, sourceScript, ModelPackId.MANGA_OCR_JAPANESE,
                 )
             }
             val manualBlocks = page.blocks.filter { it.eraseBounds == null }

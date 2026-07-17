@@ -9,6 +9,7 @@ enum class OcrProvider(val label: String) {
     ML_KIT("Google ML Kit (offline)"),
     RAPID_OCR("RapidOCR pack (download)"),
     RAPID_OCR_V5("RapidOCR PP-OCRv5 (download / experimental)"),
+    MANGA_OCR("Manga-OCR (download / experimental / Japanese)"),
 }
 
 enum class TranslationProvider(val label: String, val paid: Boolean = false) {

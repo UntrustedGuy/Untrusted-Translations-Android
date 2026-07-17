@@ -20,6 +20,7 @@ enum class ModelPackId {
     RAPID_OCR_V5_KOREAN,
     RAPID_OCR_V5_CHINESE,
     RAPID_OCR_V5_LATIN,
+    MANGA_OCR_JAPANESE,
     NLLB_TRANSLATION,
 }
 
@@ -48,6 +49,8 @@ private data class PackFile(val name: String, val url: String, val sha256: Strin
 object ModelPackManager {
     private const val RAPID_BASE =
         "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master"
+    private const val MANGA_OCR_BASE =
+        "https://huggingface.co/l0wgear/manga-ocr-2025-onnx/resolve/main"
     private const val HF_BASE =
         "https://huggingface.co/monkt/paddleocr-onnx/resolve/main"
     private const val NLLB_BASE =
@@ -261,6 +264,13 @@ object ModelPackManager {
             PackFile("det.onnx", "$HF_BASE/detection/v5/det.onnx"),
             PackFile("rec.onnx", "$HF_BASE/languages/latin/rec.onnx"),
             PackFile("keys.txt", "$HF_BASE/languages/latin/dict.txt"),
+        )
+        ModelPackId.MANGA_OCR_JAPANESE -> listOf(
+            PackFile("encoder_model.onnx", "$MANGA_OCR_BASE/encoder_model.onnx"),
+            PackFile("decoder_model.onnx", "$MANGA_OCR_BASE/decoder_model.onnx"),
+            PackFile("config.json", "$MANGA_OCR_BASE/config.json"),
+            PackFile("tokenizer.json", "$MANGA_OCR_BASE/tokenizer.json"),
+            PackFile("preprocessor_config.json", "$MANGA_OCR_BASE/preprocessor_config.json"),
         )
         ModelPackId.NLLB_TRANSLATION -> listOf(
             PackFile("NLLB_cache_initializer.onnx", "$NLLB_BASE/NLLB_cache_initializer.onnx"),

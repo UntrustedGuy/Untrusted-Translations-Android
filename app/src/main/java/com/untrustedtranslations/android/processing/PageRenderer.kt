@@ -49,7 +49,17 @@ object PageRenderer {
         )
         if (rect.width() < 2f || rect.height() < 2f) return
 
-        TextInpainter.erase(bitmap, rect)
+        block.eraseBounds?.let { erase ->
+            TextInpainter.erase(
+                bitmap,
+                RectF(
+                    erase.left * bitmap.width,
+                    erase.top * bitmap.height,
+                    erase.right * bitmap.width,
+                    erase.bottom * bitmap.height,
+                ),
+            )
+        }
 
         val padding = (rect.width() * .06f).coerceAtLeast(4f)
         val textWidth = (rect.width() - padding * 2).toInt().coerceAtLeast(20)
@@ -59,23 +69,31 @@ object PageRenderer {
             block.style.fontSizeSp,
             context.resources.displayMetrics,
         )
-        var textLayout = layout(renderText, textWidth, textSize, block)
+        var textLayout = layout(context, renderText, textWidth, textSize, block)
         while (textLayout.height > rect.height() - padding * 2 && textSize > 10f) {
             textSize -= 1f
-            textLayout = layout(renderText, textWidth, textSize, block)
+            textLayout = layout(context, renderText, textWidth, textSize, block)
         }
         canvas.save()
         canvas.rotate(block.style.rotationDegrees, rect.centerX(), rect.centerY())
+        block.style.backgroundColorArgb?.let { background ->
+            canvas.drawRoundRect(
+                rect,
+                minOf(rect.width(), rect.height()) * .12f,
+                minOf(rect.width(), rect.height()) * .12f,
+                android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = background.toInt() },
+            )
+        }
         canvas.translate(rect.left + padding, rect.centerY() - textLayout.height / 2f)
         textLayout.draw(canvas)
         canvas.restore()
     }
 
-    private fun layout(text: String, width: Int, size: Float, block: TextBlock): StaticLayout {
+    private fun layout(context: Context, text: String, width: Int, size: Float, block: TextBlock): StaticLayout {
         val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             color = block.style.textColorArgb.toInt()
             textSize = size
-            typeface = typeface(block)
+            typeface = typeface(context, block)
         }
         val alignment = when (block.style.alignment) {
             TextAlignmentChoice.START -> Layout.Alignment.ALIGN_NORMAL
@@ -89,7 +107,7 @@ object PageRenderer {
             .build()
     }
 
-    private fun typeface(block: TextBlock): Typeface {
+    private fun typeface(context: Context, block: TextBlock): Typeface {
         val family = when (block.style.font) {
             FontChoice.AUTO -> Typeface.DEFAULT
             FontChoice.SANS -> Typeface.SANS_SERIF
@@ -97,6 +115,7 @@ object PageRenderer {
             FontChoice.CONDENSED -> Typeface.create("sans-serif-condensed", Typeface.NORMAL)
             FontChoice.MONOSPACE -> Typeface.MONOSPACE
             FontChoice.CASUAL -> Typeface.create("casual", Typeface.NORMAL)
+            FontChoice.MANGA -> Typeface.createFromAsset(context.assets, "fonts/comic_neue_bold.ttf")
         }
         val style = when {
             block.style.bold && block.style.italic -> Typeface.BOLD_ITALIC

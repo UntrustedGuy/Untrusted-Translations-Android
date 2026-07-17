@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import com.untrustedtranslations.android.model.*
 import kotlinx.coroutines.Dispatchers
@@ -28,10 +29,80 @@ object ComicImporter {
             ImportFormat.IMAGE -> listOf(importImage(context, uri, root, displayName))
             ImportFormat.PDF -> importPdf(context, uri, root)
             ImportFormat.CBZ, ImportFormat.ZIP -> importArchive(context, uri, root)
+            ImportFormat.FOLDER -> error("Use folder import for a directory.")
         }
         require(pages.isNotEmpty()) { "No supported images were found in this file." }
         ComicProject(projectId, displayName.substringBeforeLast('.'), format, pages)
     }
+
+    suspend fun importFolder(context: Context, treeUri: Uri): ComicProject = withContext(Dispatchers.IO) {
+        val projectId = UUID.randomUUID().toString()
+        val root = File(context.filesDir, "projects/$projectId").apply { mkdirs() }
+        val selected = collectFolderImages(context, treeUri)
+        require(selected.isNotEmpty()) { "No JPG, PNG, or WebP images were found in this folder." }
+        val pages = selected.sortedBy { naturalKey(it.first) }.mapIndexed { index, (name, uri) ->
+            val extension = name.substringAfterLast('.', "png").lowercase()
+            val file = File(root, "folder-${(index + 1).toString().padStart(4, '0')}.$extension")
+            context.contentResolver.openInputStream(uri).use { input ->
+                requireNotNull(input) { "Unable to open $name." }
+                file.outputStream().use(input::copyTo)
+            }
+            ComicPage("page-${index + 1}", name.substringAfterLast('/'), Uri.fromFile(file))
+        }
+        val title = DocumentsContract.getTreeDocumentId(treeUri)
+            .substringAfterLast(':')
+            .substringAfterLast('/')
+            .ifBlank { "Image folder" }
+        ComicProject(projectId, title, ImportFormat.FOLDER, pages)
+    }
+
+    private fun collectFolderImages(context: Context, treeUri: Uri): List<Pair<String, Uri>> {
+        data class Entry(val id: String, val name: String, val mimeType: String)
+
+        val resolver = context.contentResolver
+        val results = mutableListOf<Pair<String, Uri>>()
+        val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+
+        fun walk(directoryId: String, prefix: String) {
+            if (results.size >= 1000) return
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, directoryId)
+            val entries = mutableListOf<Entry>()
+            resolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE,
+                ),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                while (cursor.moveToNext()) {
+                    entries += Entry(
+                        cursor.getString(idColumn),
+                        cursor.getString(nameColumn),
+                        cursor.getString(mimeColumn),
+                    )
+                }
+            }
+            entries.forEach { entry ->
+                val relativeName = if (prefix.isBlank()) entry.name else "$prefix/${entry.name}"
+                if (entry.mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    walk(entry.id, relativeName)
+                } else if (entry.name.substringAfterLast('.', "").lowercase() in imageExtensions) {
+                    results += relativeName to DocumentsContract.buildDocumentUriUsingTree(treeUri, entry.id)
+                }
+            }
+        }
+
+        walk(rootId, "")
+        return results
+    }
+
 
     private fun importImage(context: Context, uri: Uri, root: File, name: String): ComicPage {
         val extension = name.substringAfterLast('.', "png").lowercase().takeIf { it in imageExtensions } ?: "png"

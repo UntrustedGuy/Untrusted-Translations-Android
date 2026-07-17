@@ -28,7 +28,7 @@ object ProjectStore {
     ) = withContext(Dispatchers.IO) {
         val root = projectRoot(context, project.id).apply { mkdirs() }
         val json = JSONObject().apply {
-            put("version", 2)
+            put("version", 4)
             put("id", project.id)
             put("title", project.title)
             put("format", project.format.name)
@@ -116,6 +116,7 @@ object ProjectStore {
         put("top", block.bounds.top)
         put("right", block.bounds.right)
         put("bottom", block.bounds.bottom)
+        put("eraseBounds", block.eraseBounds?.let { boundsToJson(it) } ?: JSONObject.NULL)
         put("fontSizeSp", block.style.fontSizeSp)
         put("rotationDegrees", block.style.rotationDegrees)
         put("font", block.style.font.name)
@@ -124,30 +125,50 @@ object ProjectStore {
         put("italic", block.style.italic)
         put("vertical", block.style.vertical)
         put("textColorArgb", block.style.textColorArgb)
+        put("backgroundColorArgb", block.style.backgroundColorArgb ?: JSONObject.NULL)
         put("applied", block.applied)
     }
 
-    private fun blockFromJson(json: JSONObject) = TextBlock(
-        id = json.getString("id"),
-        originalText = json.optString("originalText"),
-        translatedText = json.optString("translatedText"),
-        bounds = RelativeBounds(
+    private fun blockFromJson(json: JSONObject): TextBlock {
+        val bounds = RelativeBounds(
             json.getDouble("left").toFloat(),
             json.getDouble("top").toFloat(),
             json.getDouble("right").toFloat(),
             json.getDouble("bottom").toFloat(),
-        ),
-        style = TextStyle(
-            fontSizeSp = json.optDouble("fontSizeSp", 22.0).toFloat(),
-            rotationDegrees = json.optDouble("rotationDegrees", 0.0).toFloat(),
-            font = enumValueOrDefault(json.optString("font"), FontChoice.AUTO),
-            alignment = enumValueOrDefault(json.optString("alignment"), TextAlignmentChoice.CENTER),
-            bold = json.optBoolean("bold", true),
-            italic = json.optBoolean("italic", false),
-            vertical = json.optBoolean("vertical", false),
-            textColorArgb = json.optLong("textColorArgb", 0xFF000000),
-        ),
-        applied = json.optBoolean("applied"),
+        )
+        return TextBlock(
+            id = json.getString("id"),
+            originalText = json.optString("originalText"),
+            translatedText = json.optString("translatedText"),
+            bounds = bounds,
+            eraseBounds = if (!json.has("eraseBounds")) bounds else json.optJSONObject("eraseBounds")?.let(::boundsFromJson),
+            style = TextStyle(
+                fontSizeSp = json.optDouble("fontSizeSp", 22.0).toFloat(),
+                rotationDegrees = json.optDouble("rotationDegrees", 0.0).toFloat(),
+                font = enumValueOrDefault(json.optString("font"), FontChoice.AUTO),
+                alignment = enumValueOrDefault(json.optString("alignment"), TextAlignmentChoice.CENTER),
+                bold = json.optBoolean("bold", true),
+                italic = json.optBoolean("italic", false),
+                vertical = json.optBoolean("vertical", false),
+                textColorArgb = json.optLong("textColorArgb", 0xFF000000),
+                backgroundColorArgb = if (json.isNull("backgroundColorArgb")) null else json.optLong("backgroundColorArgb"),
+            ),
+            applied = json.optBoolean("applied"),
+        )
+    }
+
+    private fun boundsToJson(bounds: RelativeBounds) = JSONObject().apply {
+        put("left", bounds.left)
+        put("top", bounds.top)
+        put("right", bounds.right)
+        put("bottom", bounds.bottom)
+    }
+
+    private fun boundsFromJson(json: JSONObject) = RelativeBounds(
+        json.getDouble("left").toFloat(),
+        json.getDouble("top").toFloat(),
+        json.getDouble("right").toFloat(),
+        json.getDouble("bottom").toFloat(),
     )
 
     private inline fun <reified T : Enum<T>> enumValueOrDefault(value: String, default: T): T =

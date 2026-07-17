@@ -9,10 +9,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.untrustedtranslations.android.importer.ComicImporter
 import com.untrustedtranslations.android.model.*
+import com.untrustedtranslations.android.persistence.AiSettings
 import com.untrustedtranslations.android.persistence.ProjectStore
-import com.untrustedtranslations.android.processing.OcrTranslationEngine
-import com.untrustedtranslations.android.processing.PageRenderer
-import com.untrustedtranslations.android.processing.ProjectExporter
+import com.untrustedtranslations.android.persistence.SecureAiSettings
+import com.untrustedtranslations.android.processing.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -32,18 +32,45 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     var busyMessage by mutableStateOf<String?>(null); private set
     var errorMessage by mutableStateOf<String?>(null); private set
     var noticeMessage by mutableStateOf<String?>(null); private set
+    var placementUpdating by mutableStateOf(false); private set
+    var showAddTextDialog by mutableStateOf(false); private set
+    var manualTextDraft by mutableStateOf(""); private set
+    var manualBackgroundArgb by mutableStateOf<Long?>(null); private set
+    var ocrProvider by mutableStateOf(OcrProvider.ML_KIT); private set
+    var translationProvider by mutableStateOf(TranslationProvider.ML_KIT); private set
+    var geminiApiKeyDraft by mutableStateOf(""); private set
+    var openAiApiKeyDraft by mutableStateOf(""); private set
+    var anthropicApiKeyDraft by mutableStateOf(""); private set
+    var compatibleApiKeyDraft by mutableStateOf(""); private set
+    var compatibleBaseUrlDraft by mutableStateOf(""); private set
+    var compatibleModelDraft by mutableStateOf(""); private set
+    var showAiSettingsDialog by mutableStateOf(false); private set
+    var modelPackProgress by mutableStateOf<ModelPackProgress?>(null); private set
+    private var packRevision by mutableStateOf(0)
+    val hasGeminiApiKey get() = geminiApiKeyDraft.isNotBlank()
 
     private val undoStack = ArrayDeque<ComicProject>()
     private val redoStack = ArrayDeque<ComicProject>()
     private var autosaveJob: Job? = null
+    private var placementRenderJob: Job? = null
+    private var placementGeneration = 0
 
     val currentPage get() = project?.let { it.pages.getOrNull(it.currentPageIndex) }
     val currentBlock get() = currentPage?.blocks?.getOrNull(selectedBlockIndex)
+    val editorBlockIndices get() = currentPage?.blocks?.indices?.filter { index ->
+        currentPage?.blocks?.get(index)?.eraseBounds != null
+    }.orEmpty()
+    val editorPosition get() = editorBlockIndices.indexOf(selectedBlockIndex)
+    val editorBlockCount get() = editorBlockIndices.size
+    val isLastEditorBlock get() = editorPosition == editorBlockIndices.lastIndex
     val isLastPage get() = project?.let { it.currentPageIndex == it.pages.lastIndex } ?: false
     val canUndo get() = undoStack.isNotEmpty()
     val canRedo get() = redoStack.isNotEmpty()
 
-    init { refreshProjects() }
+    init {
+        loadProviderDrafts()
+        refreshProjects()
+    }
 
     fun selectSourceScript(value: SourceScript) { sourceScript = value; sourceLanguageTag = value.languageTag }
     fun setSourceLanguage(value: String) { sourceLanguageTag = value }
@@ -51,9 +78,144 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun dismissError() { errorMessage = null }
     fun dismissNotice() { noticeMessage = null }
 
+    private fun loadProviderDrafts() {
+        SecureAiSettings.load(getApplication()).let {
+            ocrProvider = it.ocrProvider
+            translationProvider = it.translationProvider
+            geminiApiKeyDraft = it.geminiApiKey
+            openAiApiKeyDraft = it.openAiApiKey
+            anthropicApiKeyDraft = it.anthropicApiKey
+            compatibleApiKeyDraft = it.compatibleApiKey
+            compatibleBaseUrlDraft = it.compatibleBaseUrl
+            compatibleModelDraft = it.compatibleModel
+        }
+    }
+
+    fun openAiSettings() {
+        loadProviderDrafts()
+        showAiSettingsDialog = true
+    }
+    fun dismissAiSettings() { showAiSettingsDialog = false }
+    fun chooseOcrProvider(value: OcrProvider) { ocrProvider = value }
+    fun chooseTranslationProvider(value: TranslationProvider) { translationProvider = value }
+    fun updateGeminiApiKey(value: String) { geminiApiKeyDraft = value }
+    fun updateOpenAiApiKey(value: String) { openAiApiKeyDraft = value }
+    fun updateAnthropicApiKey(value: String) { anthropicApiKeyDraft = value }
+    fun updateCompatibleApiKey(value: String) { compatibleApiKeyDraft = value }
+    fun updateCompatibleBaseUrl(value: String) { compatibleBaseUrlDraft = value }
+    fun updateCompatibleModel(value: String) { compatibleModelDraft = value }
+
+    fun clearGeminiApiKey() {
+        geminiApiKeyDraft = ""
+        if (ocrProvider == OcrProvider.GEMINI_FREE) ocrProvider = OcrProvider.ML_KIT
+        if (translationProvider == TranslationProvider.GEMINI_FREE) {
+            translationProvider = TranslationProvider.ML_KIT
+        }
+        saveProviderDrafts()
+    }
+    fun clearPaidApiKey(provider: TranslationProvider) {
+        when (provider) {
+            TranslationProvider.OPENAI -> openAiApiKeyDraft = ""
+            TranslationProvider.ANTHROPIC -> anthropicApiKeyDraft = ""
+            TranslationProvider.OPENAI_COMPATIBLE -> compatibleApiKeyDraft = ""
+            else -> Unit
+        }
+        saveProviderDrafts()
+    }
+
+    fun saveAiSettings() {
+        val usesGemini =
+            ocrProvider == OcrProvider.GEMINI_FREE ||
+                translationProvider == TranslationProvider.GEMINI_FREE
+        val problem = when {
+            usesGemini && geminiApiKeyDraft.isBlank() ->
+                "Paste a Gemini API key, or choose another provider."
+            translationProvider == TranslationProvider.OPENAI && openAiApiKeyDraft.isBlank() ->
+                "Paste an OpenAI API key, or choose another translator."
+            translationProvider == TranslationProvider.ANTHROPIC && anthropicApiKeyDraft.isBlank() ->
+                "Paste a Claude API key, or choose another translator."
+            translationProvider == TranslationProvider.OPENAI_COMPATIBLE &&
+                !compatibleBaseUrlDraft.startsWith("https://") ->
+                "The custom API URL must start with https://."
+            translationProvider == TranslationProvider.OPENAI_COMPATIBLE &&
+                compatibleModelDraft.isBlank() ->
+                "Enter the custom API model name."
+            else -> null
+        }
+        if (problem != null) {
+            errorMessage = problem
+            return
+        }
+        saveProviderDrafts()
+        showAiSettingsDialog = false
+        noticeMessage = when {
+            translationProvider.paid ->
+                "Paid API selected. Your provider may charge your account for every translation."
+            translationProvider == TranslationProvider.GOOGLE_UNOFFICIAL ->
+                "Unofficial Google Translate is enabled. It is free but may stop working without notice."
+            else -> "OCR and translation providers saved."
+        }
+    }
+
+    private fun saveProviderDrafts() {
+        SecureAiSettings.save(
+            getApplication(),
+            AiSettings(
+                ocrProvider = ocrProvider,
+                translationProvider = translationProvider,
+                geminiApiKey = geminiApiKeyDraft,
+                openAiApiKey = openAiApiKeyDraft,
+                anthropicApiKey = anthropicApiKeyDraft,
+                compatibleApiKey = compatibleApiKeyDraft,
+                compatibleBaseUrl = compatibleBaseUrlDraft,
+                compatibleModel = compatibleModelDraft,
+            ),
+        )
+    }
+
+    fun isPackInstalled(id: ModelPackId): Boolean {
+        @Suppress("UNUSED_VARIABLE") val revision = packRevision
+        return ModelPackManager.isInstalled(getApplication(), id)
+    }
+
+    fun downloadPack(id: ModelPackId) = viewModelScope.launch {
+        if (modelPackProgress != null) return@launch
+        try {
+            ModelPackManager.download(getApplication(), id) { modelPackProgress = it }
+            packRevision++
+
+            noticeMessage = "${ModelPackManager.info(id).title} is ready."
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            errorMessage = error.message ?: "Could not download the model pack."
+        } finally {
+            modelPackProgress = null
+        }
+    }
+
+    fun deletePack(id: ModelPackId) = viewModelScope.launch {
+        if (id == ModelPackId.NLLB_TRANSLATION) NllbTranslationEngine.release()
+        ModelPackManager.delete(getApplication(), id)
+        if (id == ModelPackManager.rapidPack(sourceScript)) ocrProvider = OcrProvider.ML_KIT
+        if (id == ModelPackId.NLLB_TRANSLATION) translationProvider = TranslationProvider.ML_KIT
+        packRevision++
+        saveProviderDrafts()
+    }
+
     fun importDocument(uri: Uri) = viewModelScope.launch {
         runBusy("Importing pages...") {
             project = ComicImporter.import(getApplication(), uri)
+            resetHistory()
+            selectedBlockIndex = 0
+            screen = AppScreen.PAGE
+            saveNow()
+        }
+        if (project != null) processCurrentPage()
+    }
+
+    fun importFolder(uri: Uri) = viewModelScope.launch {
+        runBusy("Importing image folder...") {
+            project = ComicImporter.importFolder(getApplication(), uri)
             resetHistory()
             selectedBlockIndex = 0
             screen = AppScreen.PAGE
@@ -76,29 +238,77 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         runBusy("Deleting project...") { ProjectStore.delete(getApplication(), saved.project.id); refreshProjectsNow() }
     }
 
-    fun processCurrentPage() = viewModelScope.launch {
+    fun processCurrentPage(deepScan: Boolean = false) = viewModelScope.launch {
         val page = currentPage ?: return@launch
-        runBusy("Detecting and translating text...") {
-            val blocks = OcrTranslationEngine.process(getApplication(), page, sourceScript, sourceLanguageTag, targetLanguageTag)
+        val ocrPack = ModelPackManager.rapidPack(sourceScript)
+        if (ocrProvider == OcrProvider.RAPID_OCR && !isPackInstalled(ocrPack)) {
+            errorMessage = "Download the ${ModelPackManager.info(ocrPack).title} pack first."
+            return@launch
+        }
+        if (translationProvider == TranslationProvider.NLLB &&
+            !isPackInstalled(ModelPackId.NLLB_TRANSLATION)
+        ) {
+            errorMessage = "Download the NLLB translation pack first."
+            return@launch
+        }
+        val message = when (ocrProvider) {
+            OcrProvider.GEMINI_FREE -> "Detecting dialogue with Gemini..."
+            OcrProvider.RAPID_OCR -> "Detecting dialogue with RapidOCR..."
+            OcrProvider.ML_KIT -> if (deepScan) "Deep scanning dialogue..." else "Detecting dialogue..."
+        }
+        runBusy(message) {
+            val detected = when (ocrProvider) {
+                OcrProvider.GEMINI_FREE -> GeminiPageEngine.process(
+                    getApplication(), page, sourceScript, sourceLanguageTag,
+                    targetLanguageTag, geminiApiKeyDraft,
+                )
+                OcrProvider.ML_KIT -> OcrTranslationEngine.process(
+                    getApplication(), page, sourceScript, sourceLanguageTag,
+                    targetLanguageTag, deepScan,
+                )
+                OcrProvider.RAPID_OCR -> RapidOcrPageEngine.process(
+                    getApplication(), page, sourceScript, ocrPack,
+                )
+            }
+            val translated = if (
+                (ocrProvider == OcrProvider.GEMINI_FREE &&
+                    translationProvider == TranslationProvider.GEMINI_FREE) ||
+                (ocrProvider == OcrProvider.ML_KIT &&
+                    translationProvider == TranslationProvider.ML_KIT)
+            ) detected else detected.map { block ->
+                block.copy(translatedText = translateWithSelectedProvider(block.originalText))
+            }
+            val manualBlocks = page.blocks.filter { it.eraseBounds == null }
             recordState()
             replaceCurrentPage(
-                page.copy(renderedSource = page.originalSource, blocks = blocks, processed = true, saved = false),
+                page.copy(renderedSource = page.originalSource, blocks = translated + manualBlocks, processed = true, saved = false),
                 record = false,
             )
-            if (blocks.isEmpty()) noticeMessage = "No text was detected. Try another source script."
+            if (translated.isEmpty()) noticeMessage =
+                "No dialogue or caption text was found. Sound effects are intentionally ignored."
+        }
+        if (translationProvider == TranslationProvider.NLLB) {
+            NllbTranslationEngine.release()
         }
     }
 
+
     fun openEditor() {
-        if (currentPage?.blocks.isNullOrEmpty()) {
-            errorMessage = "No text blocks are available. Detect again or add a text block manually."
+        val detectedBlocks = editorBlockIndices
+        if (detectedBlocks.isEmpty()) {
+            errorMessage = "No detected text is available. Run Detect first."
             return
         }
-        selectedBlockIndex = selectedBlockIndex.coerceIn(0, currentPage?.blocks?.lastIndex ?: 0)
+        if (selectedBlockIndex !in detectedBlocks) selectedBlockIndex = detectedBlocks.first()
         screen = AppScreen.EDITOR
     }
 
     fun closeEditor() { screen = AppScreen.PAGE }
+    fun saveAndCloseEditor() {
+        if (busyMessage != null) return
+        save()
+        screen = AppScreen.PAGE
+    }
     fun updateOriginal(value: String) = editBlock { copy(originalText = value, applied = false) }
     fun updateTranslation(value: String) = editBlock { copy(translatedText = value, applied = false) }
     fun updateFontSize(value: Float) = editBlock { copy(style = style.copy(fontSizeSp = value), applied = false) }
@@ -109,25 +319,122 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun updateItalic(value: Boolean) = editBlock { copy(style = style.copy(italic = value), applied = false) }
     fun updateVertical(value: Boolean) = editBlock { copy(style = style.copy(vertical = value), applied = false) }
     fun updateTextColor(value: Long) = editBlock { copy(style = style.copy(textColorArgb = value), applied = false) }
-    fun previousBlock() { if (selectedBlockIndex > 0) selectedBlockIndex-- }
-    fun nextBlock() { if (selectedBlockIndex < (currentPage?.blocks?.lastIndex ?: 0)) selectedBlockIndex++ }
+    fun previousBlock() {
+        val indices = editorBlockIndices
+        val position = indices.indexOf(selectedBlockIndex)
+        if (position > 0) selectedBlockIndex = indices[position - 1]
+    }
+    fun nextBlock() {
+        val indices = editorBlockIndices
+        val position = indices.indexOf(selectedBlockIndex)
+        if (position in 0 until indices.lastIndex) selectedBlockIndex = indices[position + 1]
+    }
 
     fun updateBounds(value: RelativeBounds) = editBlock { copy(bounds = value, applied = false) }
     fun updateHorizontal(center: Float) = editBlock { copy(bounds = resizeBounds(bounds, centerX = center), applied = false) }
     fun updateVertical(center: Float) = editBlock { copy(bounds = resizeBounds(bounds, centerY = center), applied = false) }
     fun updateWidth(width: Float) = editBlock { copy(bounds = resizeBounds(bounds, width = width), applied = false) }
     fun updateHeight(height: Float) = editBlock { copy(bounds = resizeBounds(bounds, height = height), applied = false) }
+    fun selectBlock(index: Int) {
+        if (index in (currentPage?.blocks?.indices ?: IntRange.EMPTY)) selectedBlockIndex = index
+    }
 
-    fun addTextBlock() {
+    fun commitPageTransform(index: Int, bounds: RelativeBounds, rotationDegrees: Float) {
         val page = currentPage ?: return
+        val block = page.blocks.getOrNull(index) ?: return
+        if (busyMessage != null) return
+        if (block.bounds == bounds && block.style.rotationDegrees == rotationDegrees) return
+        val oldHeight = (block.bounds.bottom - block.bounds.top).coerceAtLeast(.001f)
+        val newHeight = (bounds.bottom - bounds.top).coerceAtLeast(.001f)
+        val resizedFont = (block.style.fontSizeSp * newHeight / oldHeight).coerceIn(8f, 160f)
+        val transformed = block.copy(
+            bounds = bounds,
+            style = block.style.copy(
+                fontSizeSp = resizedFont,
+                rotationDegrees = rotationDegrees,
+            ),
+            applied = true,
+        )
+        val blocks = page.blocks.toMutableList().apply { this[index] = transformed }
         recordState()
-        val block = TextBlock(UUID.randomUUID().toString(), "", "", RelativeBounds(.2f, .35f, .8f, .55f))
-        replaceCurrentPage(page.copy(blocks = page.blocks + block, saved = false), record = false)
-        selectedBlockIndex = page.blocks.size
-        screen = AppScreen.EDITOR
+        replaceCurrentPage(page.copy(blocks = blocks, saved = false), record = false)
+        selectedBlockIndex = index
+
+        val generation = ++placementGeneration
+        placementRenderJob?.cancel()
+        placementUpdating = true
+        placementRenderJob = viewModelScope.launch {
+            delay(180)
+            try {
+                val pageForRender = currentPage ?: return@launch
+                if (pageForRender.id != page.id) return@launch
+                val rendered = PageRenderer.apply(getApplication(), pageForRender, pageForRender.blocks)
+                if (generation == placementGeneration) {
+                    val latest = currentPage
+                    if (latest?.id == page.id) {
+                        replaceCurrentPage(latest.copy(renderedSource = rendered), record = false)
+                    }
+                }
+            } catch (error: Throwable) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                if (generation == placementGeneration) {
+                    errorMessage = error.message ?: "Unable to update text placement."
+                }
+            } finally {
+                if (generation == placementGeneration) placementUpdating = false
+            }
+        }
+    }
+
+
+
+    fun showAddTextEditor() {
+        manualTextDraft = ""
+        manualBackgroundArgb = null
+        showAddTextDialog = true
+    }
+
+    fun dismissAddTextEditor() { showAddTextDialog = false }
+    fun updateManualText(value: String) { manualTextDraft = value }
+    fun updateManualBackground(value: Long?) { manualBackgroundArgb = value }
+
+    fun confirmAddText() = viewModelScope.launch {
+        val page = currentPage ?: return@launch
+        val text = manualTextDraft.trim()
+        if (text.isBlank() || busyMessage != null) return@launch
+        runBusy("Adding text to page...") {
+            val block = TextBlock(
+                id = UUID.randomUUID().toString(),
+                originalText = "",
+                translatedText = text,
+                bounds = RelativeBounds(.3f, .44f, .7f, .56f),
+                eraseBounds = null,
+                style = TextStyle(
+                    fontSizeSp = 24f,
+                    font = FontChoice.MANGA,
+                    alignment = TextAlignmentChoice.CENTER,
+                    bold = true,
+                    textColorArgb = if (manualBackgroundArgb == 0xFF000000L) 0xFFFFFFFFL else 0xFF000000L,
+                    backgroundColorArgb = manualBackgroundArgb,
+                ),
+                applied = true,
+            )
+            val blocks = page.blocks + block
+            val rendered = PageRenderer.apply(getApplication(), page, blocks)
+            recordState()
+            replaceCurrentPage(
+                page.copy(renderedSource = rendered, blocks = blocks, saved = false),
+                record = false,
+            )
+            selectedBlockIndex = blocks.lastIndex
+            manualTextDraft = ""
+            showAddTextDialog = false
+            screen = AppScreen.PAGE
+        }
     }
 
     fun deleteCurrentBlock() = viewModelScope.launch {
+        if (busyMessage != null) return@launch
         val page = currentPage ?: return@launch
         if (page.blocks.isEmpty()) return@launch
         recordState()
@@ -141,12 +448,44 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun translateCurrentBlock() = viewModelScope.launch {
         val block = currentBlock ?: return@launch
         runBusy("Translating selected text...") {
-            val translation = OcrTranslationEngine.translateText(block.originalText, sourceLanguageTag, targetLanguageTag)
+            val translation = translateWithSelectedProvider(block.originalText)
             editBlock { copy(translatedText = translation, applied = false) }
         }
+        if (translationProvider == TranslationProvider.NLLB) NllbTranslationEngine.release()
     }
 
+    private suspend fun translateWithSelectedProvider(text: String): String =
+        when (translationProvider) {
+            TranslationProvider.GEMINI_FREE -> GeminiPageEngine.translateText(
+                text, sourceLanguageTag, targetLanguageTag, geminiApiKeyDraft,
+            )
+            TranslationProvider.ML_KIT -> OcrTranslationEngine.translateText(
+                text, sourceLanguageTag, targetLanguageTag,
+            )
+            TranslationProvider.NLLB -> NllbTranslationEngine.translate(
+                getApplication(), text, sourceLanguageTag, targetLanguageTag,
+            )
+            TranslationProvider.GOOGLE_UNOFFICIAL -> RemoteTranslationEngines.unofficialGoogle(
+                text, sourceLanguageTag, targetLanguageTag,
+            )
+            TranslationProvider.OPENAI -> RemoteTranslationEngines.openAi(
+                text, sourceLanguageTag, targetLanguageTag, openAiApiKeyDraft,
+            )
+            TranslationProvider.ANTHROPIC -> RemoteTranslationEngines.anthropic(
+                text, sourceLanguageTag, targetLanguageTag, anthropicApiKeyDraft,
+            )
+            TranslationProvider.OPENAI_COMPATIBLE -> RemoteTranslationEngines.openAiCompatible(
+                text = text,
+                source = sourceLanguageTag,
+                target = targetLanguageTag,
+                apiKey = compatibleApiKeyDraft,
+                baseUrl = compatibleBaseUrlDraft,
+                model = compatibleModelDraft,
+            )
+        }
+
     fun applyBlock() = viewModelScope.launch {
+        if (busyMessage != null) return@launch
         val page = currentPage ?: return@launch
         val block = currentBlock ?: return@launch
         runBusy("Replacing text on page...") {
@@ -175,9 +514,30 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         scheduleAutosave()
     }
 
-    fun save() = currentPage?.let { replaceCurrentPage(it.copy(saved = true)) }
+    fun save() {
+        if (busyMessage != null || placementUpdating) return
+        currentPage?.let { replaceCurrentPage(it.copy(saved = true)) }
+    }
+    fun previousPage() {
+        if (busyMessage != null || placementUpdating) return
+        save()
+        val current = project ?: return
+        if (current.currentPageIndex <= 0) return
+        recordState()
+        project = current.copy(
+            currentPageIndex = current.currentPageIndex - 1,
+            updatedAt = System.currentTimeMillis(),
+        )
+        selectedBlockIndex = 0
+        screen = AppScreen.PAGE
+        scheduleAutosave()
+        if (currentPage?.processed != true) processCurrentPage()
+    }
+
+
 
     fun saveAndNext() {
+        if (busyMessage != null || placementUpdating) return
         save()
         val current = project ?: return
         if (current.currentPageIndex >= current.pages.lastIndex) return
@@ -190,6 +550,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun saveAndExit() = viewModelScope.launch {
+        if (busyMessage != null || placementUpdating) return@launch
         save()
         val current = project ?: return@launch
         runBusy("Exporting translated comic...") {

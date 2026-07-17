@@ -1,6 +1,7 @@
 package com.untrustedtranslations.android.ui
 
 import android.graphics.BitmapFactory
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -28,11 +29,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -65,15 +68,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.untrustedtranslations.android.importer.ImportContract
-import com.untrustedtranslations.android.model.ComicPage
-import com.untrustedtranslations.android.model.FontChoice
-import com.untrustedtranslations.android.model.SavedProject
-import com.untrustedtranslations.android.model.SourceScript
-import com.untrustedtranslations.android.model.TextAlignmentChoice
+import com.untrustedtranslations.android.model.*
+import com.untrustedtranslations.android.processing.*
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -99,6 +100,7 @@ private fun languageName(tag: String): String =
 
 @Composable
 fun TranslationApp(vm: TranslationViewModel = viewModel()) {
+    if (vm.screen == AppScreen.EDITOR) BackHandler(onBack = vm::saveAndCloseEditor)
     Box(Modifier.fillMaxSize().background(AppColors.Void)) {
         when (vm.screen) {
             AppScreen.IMPORT -> ImportScreen(vm)
@@ -107,6 +109,8 @@ fun TranslationApp(vm: TranslationViewModel = viewModel()) {
         }
         vm.busyMessage?.let { message -> BusyOverlay(message) }
     }
+    if (vm.showAddTextDialog) AddTextDialog(vm)
+    if (vm.showAiSettingsDialog) AiSettingsDialog(vm)
     vm.errorMessage?.let { message ->
         AlertDialog(
             onDismissRequest = vm::dismissError,
@@ -124,6 +128,265 @@ fun TranslationApp(vm: TranslationViewModel = viewModel()) {
         )
     }
 }
+
+@Composable
+
+private fun AiSettingsDialog(vm: TranslationViewModel) {
+    val rapidPack = ModelPackManager.rapidPack(vm.sourceScript)
+    val usesGemini =
+        vm.ocrProvider == OcrProvider.GEMINI_FREE ||
+            vm.translationProvider == TranslationProvider.GEMINI_FREE
+    AlertDialog(
+        onDismissRequest = vm::dismissAiSettings,
+        title = { Text("OCR & translation") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("OCR engine", fontWeight = FontWeight.Bold, color = AppColors.Cyan)
+                Selector(
+                    label = "Detect text with",
+                    value = vm.ocrProvider.label,
+                    options = OcrProvider.entries.map { it.label },
+                ) { label ->
+                    vm.chooseOcrProvider(OcrProvider.entries.first { it.label == label })
+                }
+                when (vm.ocrProvider) {
+                    OcrProvider.RAPID_OCR -> ModelPackCard(vm, rapidPack)
+                    OcrProvider.ML_KIT -> ProviderNote(
+                        "Lightweight and offline. Good for clean print, but weaker on stylized or vertical manga text.",
+                    )
+                    OcrProvider.GEMINI_FREE -> ProviderNote(
+                        "Reads the whole page for context and ignores sound effects. Requires a Gemini API key.",
+                    )
+                }
+
+                Text("Translation engine", fontWeight = FontWeight.Bold, color = AppColors.Cyan)
+                Selector(
+                    label = "Translate text with",
+                    value = vm.translationProvider.label,
+                    options = TranslationProvider.entries.map { it.label },
+                ) { label ->
+                    vm.chooseTranslationProvider(
+                        TranslationProvider.entries.first { it.label == label },
+                    )
+                }
+                when (vm.translationProvider) {
+                    TranslationProvider.NLLB -> ModelPackCard(vm, ModelPackId.NLLB_TRANSLATION)
+                    TranslationProvider.GOOGLE_UNOFFICIAL -> ProviderNote(
+                        "Unofficial / experimental. Free and needs no key or login, but Google can change or block it at any time. No cookies are used.",
+                        warning = true,
+                    )
+                    TranslationProvider.ML_KIT -> ProviderNote(
+                        "Free and offline. Fast, but its sentence quality can be weaker for context-heavy dialogue.",
+                    )
+                    TranslationProvider.GEMINI_FREE -> ProviderNote(
+                        "Context-aware online translation using the user's free Gemini quota.",
+                    )
+                    TranslationProvider.OPENAI,
+                    TranslationProvider.ANTHROPIC,
+                    TranslationProvider.OPENAI_COMPATIBLE -> ProviderNote(
+                        "Paid API option. Your provider may charge for every request. The app never enables billing for you.",
+                        warning = true,
+                    )
+                }
+
+                if (usesGemini) {
+                    ProviderSecretField(
+                        value = vm.geminiApiKeyDraft,
+                        onValueChange = vm::updateGeminiApiKey,
+                        label = "Gemini API key",
+                    )
+                    ProviderNote(
+                        "Create it in Google AI Studio. Keep billing disabled to stay on the free quota; processing stops when that quota is exhausted.",
+                    )
+                    if (vm.hasGeminiApiKey) {
+                        TextButton(vm::clearGeminiApiKey) { Text("Remove Gemini key / switch account") }
+                    }
+                }
+
+                when (vm.translationProvider) {
+                    TranslationProvider.OPENAI -> {
+                        ProviderSecretField(
+                            vm.openAiApiKeyDraft,
+                            vm::updateOpenAiApiKey,
+                            "OpenAI API key",
+                        )
+                        TextButton({ vm.clearPaidApiKey(TranslationProvider.OPENAI) }) {
+                            Text("Remove OpenAI key")
+                        }
+                    }
+                    TranslationProvider.ANTHROPIC -> {
+                        ProviderSecretField(
+                            vm.anthropicApiKeyDraft,
+                            vm::updateAnthropicApiKey,
+                            "Claude API key",
+                        )
+                        TextButton({ vm.clearPaidApiKey(TranslationProvider.ANTHROPIC) }) {
+                            Text("Remove Claude key")
+                        }
+                    }
+                    TranslationProvider.OPENAI_COMPATIBLE -> {
+                        OutlinedTextField(
+                            value = vm.compatibleBaseUrlDraft,
+                            onValueChange = vm::updateCompatibleBaseUrl,
+                            label = { Text("API base URL (https://...)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = vm.compatibleModelDraft,
+                            onValueChange = vm::updateCompatibleModel,
+                            label = { Text("Model name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        ProviderSecretField(
+                            vm.compatibleApiKeyDraft,
+                            vm::updateCompatibleApiKey,
+                            "API key (optional if server needs none)",
+                        )
+                        TextButton({ vm.clearPaidApiKey(TranslationProvider.OPENAI_COMPATIBLE) }) {
+                            Text("Remove custom API key")
+                        }
+                    }
+                    else -> Unit
+                }
+
+                ProviderNote(
+                    "Sound effects are intentionally ignored. ChatGPT and Claude website logins cannot be used as API credit.",
+                )
+            }
+        },
+        confirmButton = { Button(vm::saveAiSettings) { Text("Save") } },
+        dismissButton = { TextButton(vm::dismissAiSettings) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ProviderSecretField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        visualTransformation = PasswordVisualTransformation(),
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun ProviderNote(text: String, warning: Boolean = false) {
+    Text(
+        text,
+        color = if (warning) Color(0xFFFFB86C) else AppColors.Muted,
+        style = MaterialTheme.typography.bodySmall,
+    )
+}
+
+@Composable
+private fun ModelPackCard(vm: TranslationViewModel, id: ModelPackId) {
+    val info = ModelPackManager.info(id)
+    val installed = vm.isPackInstalled(id)
+    val progress = vm.modelPackProgress?.takeIf { it.pack == id }
+    Card(colors = CardDefaults.cardColors(containerColor = AppColors.SurfaceRaised)) {
+        Column(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(info.title, fontWeight = FontWeight.Bold)
+            Text(info.description, color = AppColors.Muted, style = MaterialTheme.typography.bodySmall)
+            Text(
+                "Download: about ${info.downloadSizeMb} MB - minimum recommended RAM: ${info.minimumRamGb} GB",
+                color = AppColors.Cyan,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(info.licenseNote, color = AppColors.Muted, style = MaterialTheme.typography.bodySmall)
+            if (progress != null) {
+                LinearProgressIndicator(
+                    progress = { progress.fraction },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Downloading ${progress.fileName}... ${(progress.fraction * 100).toInt()}%",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else if (installed) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Installed", color = AppColors.Cyan, modifier = Modifier.weight(1f))
+                    TextButton({ vm.deletePack(id) }) { Text("Delete pack") }
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { vm.downloadPack(id) },
+                    enabled = vm.modelPackProgress == null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Download pack")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddTextDialog(vm: TranslationViewModel) {
+    AlertDialog(
+        onDismissRequest = vm::dismissAddTextEditor,
+        title = { Text("Add text") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                OutlinedTextField(
+                    value = vm.manualTextDraft,
+                    onValueChange = vm::updateManualText,
+                    label = { Text("Text") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Font: Manga (Comic Neue Bold)",
+                    color = AppColors.Cyan,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text("Background", color = AppColors.Muted)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = vm.manualBackgroundArgb == null,
+                        onClick = { vm.updateManualBackground(null) },
+                        label = { Text("None") },
+                    )
+                    FilterChip(
+                        selected = vm.manualBackgroundArgb == 0xFFFFFFFFL,
+                        onClick = { vm.updateManualBackground(0xFFFFFFFFL) },
+                        label = { Text("White") },
+                    )
+                    FilterChip(
+                        selected = vm.manualBackgroundArgb == 0xFF000000L,
+                        onClick = { vm.updateManualBackground(0xFF000000L) },
+                        label = { Text("Black") },
+                    )
+                }
+                Text(
+                    "Added text starts in the page center. Move, resize, or rotate it directly on the page.",
+                    color = AppColors.Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {
+            Button(vm::confirmAddText, enabled = vm.manualTextDraft.isNotBlank()) { Text("Add") }
+        },
+        dismissButton = {
+            TextButton(vm::dismissAddTextEditor) { Text("Cancel") }
+        },
+    )
+}
+
 
 @Composable
 private fun BusyOverlay(message: String) {
@@ -150,6 +413,9 @@ private fun ImportScreen(vm: TranslationViewModel) {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(vm::importDocument)
     }
+    val folderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let(vm::importFolder)
+    }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -169,16 +435,29 @@ private fun ImportScreen(vm: TranslationViewModel) {
             color = AppColors.Muted,
             style = MaterialTheme.typography.bodyLarge,
         )
+        OutlinedButton(
+            onClick = vm::openAiSettings,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.Settings, null)
+            Spacer(Modifier.width(8.dp))
+            Text("OCR: ${vm.ocrProvider.label} ? TL: ${vm.translationProvider.label}")
+        }
         Selector(
-            label = "Source text",
+            label = "Text detection script",
             value = vm.sourceScript.label,
             options = SourceScript.entries.map { it.label },
         ) { label -> vm.selectSourceScript(SourceScript.entries.first { it.label == label }) }
         Selector(
-            label = "Source language",
+            label = "Translate from",
             value = languageName(vm.sourceLanguageTag),
             options = targetTags.map(::languageName),
         ) { label -> vm.setSourceLanguage(targetTags.first { languageName(it) == label }) }
+        Text(
+            "Detection script chooses the OCR model. Translate from chooses the actual language; many languages share the Latin script.",
+            color = AppColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
         Selector(
             label = "Translate to",
             value = languageName(vm.targetLanguageTag),
@@ -191,6 +470,14 @@ private fun ImportScreen(vm: TranslationViewModel) {
             Icon(Icons.Default.FileOpen, null)
             Spacer(Modifier.width(10.dp))
             Text("Import image, PDF, CBZ or ZIP")
+        }
+        OutlinedButton(
+            onClick = { folderLauncher.launch(null) },
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+        ) {
+            Icon(Icons.Default.FileOpen, null)
+            Spacer(Modifier.width(10.dp))
+            Text("Select folder of images")
         }
         Text(
             "A page advances only after you tap Save & Next.",
@@ -255,6 +542,7 @@ private fun Selector(label: String, value: String, options: List<String>, onSele
 private fun PageScreen(vm: TranslationViewModel) {
     val project = vm.project ?: return
     val page = vm.currentPage ?: return
+    var transformMode by remember(page.id) { mutableStateOf(PageTransformMode.RESIZE) }
     Scaffold(
         containerColor = AppColors.Void,
         topBar = {
@@ -273,33 +561,81 @@ private fun PageScreen(vm: TranslationViewModel) {
                 actions = {
                     IconButton(vm::undo, enabled = vm.canUndo) { Icon(Icons.Default.Undo, "Undo") }
                     IconButton(vm::redo, enabled = vm.canRedo) { Icon(Icons.Default.Redo, "Redo") }
-                    TextButton(vm::save) { Text(if (page.saved) "Saved" else "Save") }
-                    if (vm.isLastPage) {
-                        Button(vm::saveAndExit) { Text("Save & Exit") }
-                    } else {
-                        Button(vm::saveAndNext) { Text("Save & Next") }
-                    }
+                    IconButton(vm::openAiSettings) { Icon(Icons.Default.Settings, "AI and OCR settings") }
                     Spacer(Modifier.width(8.dp))
                 },
             )
         },
     ) { padding ->
-        Column(Modifier.padding(padding).padding(14.dp).fillMaxSize()) {
-            PagePreview(page, Modifier.weight(1f).fillMaxWidth())
-            Spacer(Modifier.height(12.dp))
+        Column(
+            Modifier.padding(padding).padding(14.dp).fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            ManipulablePagePreview(
+                page = page,
+                selectedBlockIndex = vm.selectedBlockIndex,
+                mode = transformMode,
+                onSelectBlock = vm::selectBlock,
+                onTransformCommitted = vm::commitPageTransform,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(vm::processCurrentPage, Modifier.weight(1f)) {
+                FilterChip(
+                    selected = transformMode == PageTransformMode.RESIZE,
+                    onClick = { transformMode = PageTransformMode.RESIZE },
+                    label = { Text("Move / Resize") },
+                    enabled = page.blocks.any { it.applied },
+                )
+                FilterChip(
+                    selected = transformMode == PageTransformMode.ROTATE,
+                    onClick = { transformMode = PageTransformMode.ROTATE },
+                    label = { Text("Move / Rotate") },
+                    enabled = page.blocks.any { it.applied },
+                )
+            }
+            Text(
+                if (transformMode == PageTransformMode.RESIZE) {
+                    "Tap applied text. Drag inside to move; drag the left, top, right, or bottom handle to resize."
+                } else {
+                    "Tap applied text. Drag inside to move; drag the round handle above it to rotate."
+                },
+                color = AppColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (vm.placementUpdating) {
+                Text(
+                    "Rendering placement?",
+                    color = AppColors.Cyan,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    vm::previousPage,
+                    modifier = Modifier.weight(1f),
+                    enabled = project.currentPageIndex > 0 && !vm.placementUpdating,
+                ) { Text("Previous page") }
+                Button(
+                    onClick = { if (vm.isLastPage) vm.saveAndExit() else vm.saveAndNext() },
+                    modifier = Modifier.weight(1f),
+                    enabled = !vm.placementUpdating,
+                ) {
+                    Text(if (vm.isLastPage) "Save & Exit" else "Save & Next")
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton({ vm.processCurrentPage(deepScan = true) }, Modifier.weight(1f)) {
                     Icon(Icons.Default.Refresh, null)
                     Spacer(Modifier.width(5.dp))
-                    Text("Detect")
+                    Text(if (vm.ocrProvider == OcrProvider.GEMINI_FREE) "Online rescan" else "Deep scan")
                 }
-                OutlinedButton(vm::addTextBlock, Modifier.weight(1f)) {
+                OutlinedButton(vm::showAddTextEditor, Modifier.weight(1f)) {
                     Icon(Icons.Default.Add, null)
                     Spacer(Modifier.width(5.dp))
                     Text("Add text")
                 }
-                Button(vm::openEditor, Modifier.weight(1.15f), enabled = page.blocks.isNotEmpty()) {
-                    Text("Editor (${page.blocks.size})")
+                Button(vm::openEditor, Modifier.weight(1.15f), enabled = vm.editorBlockCount > 0) {
+                    Text("Editor (${vm.editorBlockCount})")
                 }
             }
         }
@@ -319,16 +655,21 @@ private fun PagePreview(page: ComicPage, modifier: Modifier = Modifier) {
         } else {
             Image(bitmap.asImageBitmap(), null, Modifier.fillMaxSize().padding(6.dp), contentScale = ContentScale.Fit)
             Canvas(Modifier.fillMaxSize().padding(6.dp)) {
+                val scale = minOf(size.width / bitmap.width, size.height / bitmap.height)
+                val imageWidth = bitmap.width * scale
+                val imageHeight = bitmap.height * scale
+                val imageLeft = (size.width - imageWidth) / 2f
+                val imageTop = (size.height - imageHeight) / 2f
                 page.blocks.forEach { block ->
                     drawRect(
                         color = if (block.applied) AppColors.Cyan else AppColors.Violet,
                         topLeft = androidx.compose.ui.geometry.Offset(
-                            block.bounds.left * size.width,
-                            block.bounds.top * size.height,
+                            imageLeft + block.bounds.left * imageWidth,
+                            imageTop + block.bounds.top * imageHeight,
                         ),
                         size = androidx.compose.ui.geometry.Size(
-                            (block.bounds.right - block.bounds.left) * size.width,
-                            (block.bounds.bottom - block.bounds.top) * size.height,
+                            (block.bounds.right - block.bounds.left) * imageWidth,
+                            (block.bounds.bottom - block.bounds.top) * imageHeight,
                         ),
                         style = Stroke(2.dp.toPx()),
                     )
@@ -343,18 +684,11 @@ private fun PagePreview(page: ComicPage, modifier: Modifier = Modifier) {
 private fun EditorScreen(vm: TranslationViewModel) {
     val page = vm.currentPage ?: return
     val block = vm.currentBlock ?: return
-    val centerX = (block.bounds.left + block.bounds.right) / 2f
-    val centerY = (block.bounds.top + block.bounds.bottom) / 2f
-    val width = block.bounds.right - block.bounds.left
-    val height = block.bounds.bottom - block.bounds.top
     Scaffold(
         containerColor = AppColors.Void,
         topBar = {
             TopAppBar(
-                navigationIcon = {
-                    IconButton(vm::closeEditor) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-                },
-                title = { Text("Text ${vm.selectedBlockIndex + 1} of ${page.blocks.size}") },
+                title = { Text("Text ${vm.editorPosition + 1} of ${vm.editorBlockCount}") },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = AppColors.Void),
                 actions = {
                     IconButton(vm::undo, enabled = vm.canUndo) { Icon(Icons.Default.Undo, "Undo") }
@@ -368,8 +702,6 @@ private fun EditorScreen(vm: TranslationViewModel) {
             Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("DRAG TO MOVE - DRAG THE DOT TO RESIZE", color = AppColors.Cyan, style = MaterialTheme.typography.labelMedium)
-            EditableBlockPreview(page, block, vm::updateBounds)
             Text("ORIGINAL OCR — EDIT IF DETECTION IS WRONG", color = AppColors.Muted, style = MaterialTheme.typography.labelMedium)
             OutlinedTextField(
                 value = block.originalText,
@@ -389,8 +721,6 @@ private fun EditorScreen(vm: TranslationViewModel) {
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3,
             )
-            ValueSlider("Font size", block.style.fontSizeSp, 10f..96f, "sp", vm::updateFontSize)
-            ValueSlider("Rotation", block.style.rotationDegrees, -180f..180f, " degrees", vm::updateRotation)
             Selector("Font", block.style.font.label, FontChoice.entries.map { it.label }) { label ->
                 vm.updateFont(FontChoice.entries.first { it.label == label })
             }
@@ -405,11 +735,11 @@ private fun EditorScreen(vm: TranslationViewModel) {
                 FilterChip(block.style.italic, { vm.updateItalic(!block.style.italic) }, { Text("Italic") })
                 FilterChip(block.style.vertical, { vm.updateVertical(!block.style.vertical) }, { Text("Vertical") })
             }
-            Text("TEXT BOX", color = AppColors.Muted, style = MaterialTheme.typography.labelMedium)
-            ValueSlider("Horizontal position", centerX, 0f..1f, "%") { vm.updateHorizontal(it) }
-            ValueSlider("Vertical position", centerY, 0f..1f, "%") { vm.updateVertical(it) }
-            ValueSlider("Box width", width, .05f..1f, "%") { vm.updateWidth(it) }
-            ValueSlider("Box height", height, .05f..1f, "%") { vm.updateHeight(it) }
+            Text(
+                "Apply the text, then move, resize, or rotate it directly on the manga page.",
+                color = AppColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
             Surface(
                 color = AppColors.SurfaceRaised,
                 shape = RoundedCornerShape(14.dp),
@@ -429,13 +759,20 @@ private fun EditorScreen(vm: TranslationViewModel) {
                 }
                 Text(if (block.applied) "Apply changes again" else "Replace original text on page")
             }
+            if (vm.isLastEditorBlock) {
+                Button(
+                    vm::saveAndCloseEditor,
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    enabled = block.applied,
+                ) { Text("Save page & close editor") }
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(vm::previousBlock, enabled = vm.selectedBlockIndex > 0, modifier = Modifier.weight(1f)) {
+                OutlinedButton(vm::previousBlock, enabled = vm.editorPosition > 0, modifier = Modifier.weight(1f)) {
                     Text("Previous")
                 }
                 OutlinedButton(
                     vm::nextBlock,
-                    enabled = vm.selectedBlockIndex < page.blocks.lastIndex,
+                    enabled = vm.editorPosition < vm.editorBlockCount - 1,
                     modifier = Modifier.weight(1f),
                 ) { Text("Next text") }
             }

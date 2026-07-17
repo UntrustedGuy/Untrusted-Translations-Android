@@ -11,8 +11,8 @@ android {
         applicationId = "com.untrustedtranslations.android"
         minSdk = 23
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0-dev"
+        versionCode = 10
+        versionName = "0.4.0"
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -44,4 +44,5 @@ dependencies {
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
     implementation("com.google.mlkit:translate:17.0.3")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.0")
 }

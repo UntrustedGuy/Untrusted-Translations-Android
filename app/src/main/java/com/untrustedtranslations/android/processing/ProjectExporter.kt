@@ -24,6 +24,7 @@ object ProjectExporter {
         when (project.format) {
             ImportFormat.IMAGE -> exportImage(context, project, "$safeTitle-translated.png")
             ImportFormat.PDF -> exportPdf(context, project, "$safeTitle-translated.pdf")
+            ImportFormat.FOLDER -> exportArchive(context, project, "$safeTitle-translated.zip", "application/zip")
             ImportFormat.ZIP -> exportArchive(context, project, "$safeTitle-translated.zip", "application/zip")
             ImportFormat.CBZ -> exportArchive(
                 context,

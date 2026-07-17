@@ -197,7 +197,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun deletePack(id: ModelPackId) = viewModelScope.launch {
         if (id == ModelPackId.NLLB_TRANSLATION) NllbTranslationEngine.release()
         ModelPackManager.delete(getApplication(), id)
-        if (id == ModelPackManager.rapidPack(sourceScript)) ocrProvider = OcrProvider.ML_KIT
+        if (id == ModelPackManager.rapidPack(sourceScript) || id == ModelPackManager.rapidPack(sourceScript, true)) ocrProvider = OcrProvider.ML_KIT
         if (id == ModelPackId.NLLB_TRANSLATION) translationProvider = TranslationProvider.ML_KIT
         packRevision++
         saveProviderDrafts()
@@ -241,8 +241,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun processCurrentPage(deepScan: Boolean = false) = viewModelScope.launch {
         val page = currentPage ?: return@launch
-        val ocrPack = ModelPackManager.rapidPack(sourceScript)
-        if (ocrProvider == OcrProvider.RAPID_OCR && !isPackInstalled(ocrPack)) {
+        val ocrPack = ModelPackManager.rapidPack(sourceScript, ocrProvider == OcrProvider.RAPID_OCR_V5)
+        if ((ocrProvider == OcrProvider.RAPID_OCR || ocrProvider == OcrProvider.RAPID_OCR_V5) && !isPackInstalled(ocrPack)) {
             errorMessage = "Download the ${ModelPackManager.info(ocrPack).title} pack first."
             return@launch
         }
@@ -255,6 +255,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         val message = when (ocrProvider) {
             OcrProvider.GEMINI_FREE -> "Detecting dialogue with Gemini..."
             OcrProvider.RAPID_OCR -> "Detecting dialogue with RapidOCR..."
+            OcrProvider.RAPID_OCR_V5 -> "Detecting dialogue with PP-OCRv5..."
             OcrProvider.ML_KIT -> if (deepScan) "Deep scanning dialogue..." else "Detecting dialogue..."
         }
         perf.start()
@@ -269,7 +270,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                     getApplication(), page, sourceScript, sourceLanguageTag,
                     targetLanguageTag, deepScan,
                 )
-                OcrProvider.RAPID_OCR -> RapidOcrPageEngine.process(
+                OcrProvider.RAPID_OCR,
+                OcrProvider.RAPID_OCR_V5 -> RapidOcrPageEngine.process(
                     getApplication(), page, sourceScript, ocrPack,
                 )
             }

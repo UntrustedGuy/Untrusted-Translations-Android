@@ -168,6 +168,17 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                         ModelPackCard(vm, ModelPackId.RAPID_OCR_CHINESE)
                         ModelPackCard(vm, ModelPackId.RAPID_OCR_LATIN)
                     }
+                    OcrProvider.RAPID_OCR_V5 -> {
+                        Text(
+                            "PP-OCRv5 models from HuggingFace — improved detection. Experimental.",
+                            color = AppColors.Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        ModelPackCard(vm, ModelPackId.RAPID_OCR_V5_JAPANESE)
+                        ModelPackCard(vm, ModelPackId.RAPID_OCR_V5_KOREAN)
+                        ModelPackCard(vm, ModelPackId.RAPID_OCR_V5_CHINESE)
+                        ModelPackCard(vm, ModelPackId.RAPID_OCR_V5_LATIN)
+                    }
                     OcrProvider.ML_KIT -> ProviderNote(
                         "Lightweight and offline. Good for clean print, but weaker on stylized or vertical manga text.",
                     )

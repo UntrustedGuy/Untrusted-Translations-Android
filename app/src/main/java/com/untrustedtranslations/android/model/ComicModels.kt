@@ -8,6 +8,7 @@ enum class OcrProvider(val label: String) {
     GEMINI_FREE("Gemini Free (online)"),
     ML_KIT("Google ML Kit (offline)"),
     RAPID_OCR("RapidOCR pack (download)"),
+    RAPID_OCR_V5("RapidOCR PP-OCRv5 (download / experimental)"),
 }
 
 enum class TranslationProvider(val label: String, val paid: Boolean = false) {

@@ -16,6 +16,10 @@ enum class ModelPackId {
     RAPID_OCR_KOREAN,
     RAPID_OCR_CHINESE,
     RAPID_OCR_LATIN,
+    RAPID_OCR_V5_JAPANESE,
+    RAPID_OCR_V5_KOREAN,
+    RAPID_OCR_V5_CHINESE,
+    RAPID_OCR_V5_LATIN,
     NLLB_TRANSLATION,
 }
 
@@ -44,6 +48,8 @@ private data class PackFile(val name: String, val url: String, val sha256: Strin
 object ModelPackManager {
     private const val RAPID_BASE =
         "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master"
+    private const val HF_BASE =
+        "https://huggingface.co/monkt/paddleocr-onnx/resolve/main"
     private const val NLLB_BASE =
         "https://github.com/niedev/RTranslator/releases/download/2.0.0"
 
@@ -73,6 +79,30 @@ object ModelPackManager {
             16, 2, "Apache-2.0 engine; Baidu PaddleOCR model terms.",
         ),
         ModelPackInfo(
+            ModelPackId.RAPID_OCR_V5_JAPANESE,
+            "RapidOCR PP-OCRv5 Japanese",
+            "Updated PP-OCRv5 detection model + v4 Japanese recognition from HuggingFace + ModelScope.",
+            18, 2, "Apache-2.0; HuggingFace monkt/paddleocr-onnx + ModelScope models.",
+        ),
+        ModelPackInfo(
+            ModelPackId.RAPID_OCR_V5_KOREAN,
+            "RapidOCR PP-OCRv5 Korean",
+            "Full PP-OCRv5 detection and recognition models from HuggingFace for Korean manhwa.",
+            17, 2, "Apache-2.0; HuggingFace monkt/paddleocr-onnx.",
+        ),
+        ModelPackInfo(
+            ModelPackId.RAPID_OCR_V5_CHINESE,
+            "RapidOCR PP-OCRv5 Chinese",
+            "Full PP-OCRv5 detection and recognition models from HuggingFace for Chinese manhua.",
+            18, 2, "Apache-2.0; HuggingFace monkt/paddleocr-onnx.",
+        ),
+        ModelPackInfo(
+            ModelPackId.RAPID_OCR_V5_LATIN,
+            "RapidOCR PP-OCRv5 Latin",
+            "Full PP-OCRv5 detection and recognition models from HuggingFace for Latin-script comics.",
+            16, 2, "Apache-2.0; HuggingFace monkt/paddleocr-onnx.",
+        ),
+        ModelPackInfo(
             ModelPackId.NLLB_TRANSLATION,
             "NLLB high-quality offline translation",
             "RTranslator's optimized NLLB-200 model. Fully offline after download; ARM64 devices only.",
@@ -80,11 +110,11 @@ object ModelPackManager {
         ),
     )
 
-    fun rapidPack(script: SourceScript) = when (script) {
-        SourceScript.JAPANESE -> ModelPackId.RAPID_OCR_JAPANESE
-        SourceScript.KOREAN -> ModelPackId.RAPID_OCR_KOREAN
-        SourceScript.CHINESE -> ModelPackId.RAPID_OCR_CHINESE
-        SourceScript.LATIN -> ModelPackId.RAPID_OCR_LATIN
+    fun rapidPack(script: SourceScript, useV5: Boolean = false) = when (script) {
+        SourceScript.JAPANESE -> if (useV5) ModelPackId.RAPID_OCR_V5_JAPANESE else ModelPackId.RAPID_OCR_JAPANESE
+        SourceScript.KOREAN -> if (useV5) ModelPackId.RAPID_OCR_V5_KOREAN else ModelPackId.RAPID_OCR_KOREAN
+        SourceScript.CHINESE -> if (useV5) ModelPackId.RAPID_OCR_V5_CHINESE else ModelPackId.RAPID_OCR_CHINESE
+        SourceScript.LATIN -> if (useV5) ModelPackId.RAPID_OCR_V5_LATIN else ModelPackId.RAPID_OCR_LATIN
     }
 
     fun info(id: ModelPackId) = packs.first { it.id == id }
@@ -211,6 +241,26 @@ object ModelPackManager {
             "latin_PP-OCRv3_rec_mobile.onnx",
             null,
             "latin_dict.txt",
+        )
+        ModelPackId.RAPID_OCR_V5_JAPANESE -> listOf(
+            PackFile("det.onnx", "$HF_BASE/detection/v5/det.onnx"),
+            PackFile("rec.onnx", "$RAPID_BASE/onnx/PP-OCRv4/rec/japan_PP-OCRv4_rec_mobile.onnx"),
+            PackFile("keys.txt", "$RAPID_BASE/paddle/PP-OCRv4/rec/japan_PP-OCRv4_rec_mobile/japan_dict.txt"),
+        )
+        ModelPackId.RAPID_OCR_V5_KOREAN -> listOf(
+            PackFile("det.onnx", "$HF_BASE/detection/v5/det.onnx"),
+            PackFile("rec.onnx", "$HF_BASE/languages/korean/rec.onnx"),
+            PackFile("keys.txt", "$HF_BASE/languages/korean/dict.txt"),
+        )
+        ModelPackId.RAPID_OCR_V5_CHINESE -> listOf(
+            PackFile("det.onnx", "$HF_BASE/detection/v5/det.onnx"),
+            PackFile("rec.onnx", "$HF_BASE/languages/chinese/rec.onnx"),
+            PackFile("keys.txt", "$HF_BASE/languages/chinese/dict.txt"),
+        )
+        ModelPackId.RAPID_OCR_V5_LATIN -> listOf(
+            PackFile("det.onnx", "$HF_BASE/detection/v5/det.onnx"),
+            PackFile("rec.onnx", "$HF_BASE/languages/latin/rec.onnx"),
+            PackFile("keys.txt", "$HF_BASE/languages/latin/dict.txt"),
         )
         ModelPackId.NLLB_TRANSLATION -> listOf(
             PackFile("NLLB_cache_initializer.onnx", "$NLLB_BASE/NLLB_cache_initializer.onnx"),

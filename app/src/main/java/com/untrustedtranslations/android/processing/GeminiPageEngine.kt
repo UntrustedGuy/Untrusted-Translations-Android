@@ -21,7 +21,7 @@ import java.util.Locale
 import java.util.UUID
 
 object GeminiPageEngine {
-    private const val MODEL = "gemini-2.5-flash"
+    private const val MODEL = "gemini-3.5-flash"
     private const val ENDPOINT =
         "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
 

@@ -85,6 +85,22 @@ data class ComicProject(
     val updatedAt: Long = System.currentTimeMillis(),
 )
 
+data class GlossaryEntry(
+    val id: String,
+    val sourceText: String,
+    val targetText: String,
+    val caseSensitive: Boolean = false,
+    val notes: String = "",
+)
+
+data class TranslationMemory(
+    val sourceText: String,
+    val targetText: String,
+    val sourceLanguage: String,
+    val targetLanguage: String,
+    val usageCount: Int = 1,
+)
+
 data class SavedProject(
     val project: ComicProject,
     val sourceScript: SourceScript,

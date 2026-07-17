@@ -43,7 +43,7 @@ private data class PackFile(val name: String, val url: String, val sha256: Strin
 
 object ModelPackManager {
     private const val RAPID_BASE =
-        "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.1"
+        "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master"
     private const val NLLB_BASE =
         "https://github.com/niedev/RTranslator/releases/download/2.0.0"
 
@@ -194,22 +194,22 @@ object ModelPackManager {
     private fun files(id: ModelPackId): List<PackFile> = when (id) {
         ModelPackId.RAPID_OCR_JAPANESE -> rapidFiles(
             "japan_PP-OCRv4_rec_mobile.onnx",
-            "e1075a67dba758ecfc7ebc78a10ae61c95ac8fb66a9c86fab5541e33f085cb7a",
+            null,
             "japan_dict.txt",
         )
         ModelPackId.RAPID_OCR_KOREAN -> rapidFiles(
             "korean_PP-OCRv4_rec_mobile.onnx",
-            "ab151ba9065eccd98f884cf4d927db091be86137276392072edd4f9d43ad7426",
+            null,
             "korean_dict.txt",
         )
         ModelPackId.RAPID_OCR_CHINESE -> rapidFiles(
             "ch_PP-OCRv4_rec_mobile.onnx",
-            "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b",
+            null,
             "ppocr_keys_v1.txt",
         )
         ModelPackId.RAPID_OCR_LATIN -> rapidFiles(
             "latin_PP-OCRv3_rec_mobile.onnx",
-            "e9d7a33667e8aaa702862975186adf2012e3f390cc0f9422865957125f8071cf",
+            null,
             "latin_dict.txt",
         )
         ModelPackId.NLLB_TRANSLATION -> listOf(
@@ -224,16 +224,14 @@ object ModelPackManager {
         )
     }
 
-    private fun rapidFiles(recognition: String, recognitionHash: String, dictionary: String) = listOf(
+    private fun rapidFiles(recognition: String, recognitionHash: String?, dictionary: String) = listOf(
         PackFile(
             "det.onnx",
             "$RAPID_BASE/onnx/PP-OCRv4/det/multi_PP-OCRv3_det_mobile.onnx",
-            "5475c6c7f4d84a6c4f32241b487435d59f126a40c023387af99732258844cdc3",
         ),
         PackFile(
             "cls.onnx",
             "$RAPID_BASE/onnx/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_mobile.onnx",
-            "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c",
         ),
         PackFile("rec.onnx", "$RAPID_BASE/onnx/PP-OCRv4/rec/$recognition", recognitionHash),
         PackFile(

@@ -54,6 +54,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     private var autosaveJob: Job? = null
     private var placementRenderJob: Job? = null
     private var placementGeneration = 0
+    private var perf = PerformanceProfiler()
 
     val currentPage get() = project?.let { it.pages.getOrNull(it.currentPageIndex) }
     val currentBlock get() = currentPage?.blocks?.getOrNull(selectedBlockIndex)
@@ -256,7 +257,9 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             OcrProvider.RAPID_OCR -> "Detecting dialogue with RapidOCR..."
             OcrProvider.ML_KIT -> if (deepScan) "Deep scanning dialogue..." else "Detecting dialogue..."
         }
+        perf.start()
         runBusy(message) {
+            perf.lap("Detect")
             val detected = when (ocrProvider) {
                 OcrProvider.GEMINI_FREE -> GeminiPageEngine.process(
                     getApplication(), page, sourceScript, sourceLanguageTag,
@@ -271,6 +274,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 )
             }
             val manualBlocks = page.blocks.filter { it.eraseBounds == null }
+            perf.lap("Translate")
             val translated = if (
                 (ocrProvider == OcrProvider.GEMINI_FREE &&
                     translationProvider == TranslationProvider.GEMINI_FREE) ||
@@ -293,6 +297,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 if (errorMessage == null) noticeMessage =
                     "No dialogue or caption text was found. Sound effects are intentionally ignored."
             }
+            perf.log("${page.displayName} ocr=${ocrProvider.name} tl=${translationProvider.name}")
         }
         if (translationProvider == TranslationProvider.NLLB) {
             NllbTranslationEngine.release()

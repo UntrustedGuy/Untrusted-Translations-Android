@@ -132,7 +132,6 @@ fun TranslationApp(vm: TranslationViewModel = viewModel()) {
 @Composable
 
 private fun AiSettingsDialog(vm: TranslationViewModel) {
-    val rapidPack = ModelPackManager.rapidPack(vm.sourceScript)
     val usesGemini =
         vm.ocrProvider == OcrProvider.GEMINI_FREE ||
             vm.translationProvider == TranslationProvider.GEMINI_FREE
@@ -153,7 +152,22 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                     vm.chooseOcrProvider(OcrProvider.entries.first { it.label == label })
                 }
                 when (vm.ocrProvider) {
-                    OcrProvider.RAPID_OCR -> ModelPackCard(vm, rapidPack)
+                    OcrProvider.RAPID_OCR -> {
+                        Text(
+                            "Download packs for each script you want to detect:",
+                            color = AppColors.Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            "Selected script: ${vm.sourceScript.label}  —  download the matching pack",
+                            color = AppColors.Cyan,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        ModelPackCard(vm, ModelPackId.RAPID_OCR_JAPANESE)
+                        ModelPackCard(vm, ModelPackId.RAPID_OCR_KOREAN)
+                        ModelPackCard(vm, ModelPackId.RAPID_OCR_CHINESE)
+                        ModelPackCard(vm, ModelPackId.RAPID_OCR_LATIN)
+                    }
                     OcrProvider.ML_KIT -> ProviderNote(
                         "Lightweight and offline. Good for clean print, but weaker on stylized or vertical manga text.",
                     )

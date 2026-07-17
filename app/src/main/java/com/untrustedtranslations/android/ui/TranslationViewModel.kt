@@ -265,7 +265,6 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             OcrProvider.RAPID_OCR -> "Detecting dialogue with RapidOCR..."
             OcrProvider.RAPID_OCR_V5 -> "Detecting dialogue with PP-OCRv5..."
             OcrProvider.MANGA_OCR -> "Reading page with Manga-OCR (vision transformer)..."
-            OcrProvider.MANGA_OCR_MULTI -> "Reading page with Baberu OCR (multilingual vision transformer)..."
             OcrProvider.ML_KIT -> if (deepScan) "Deep scanning dialogue..." else "Detecting dialogue..."
         }
         perf.start()
@@ -286,9 +285,6 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 )
                 OcrProvider.MANGA_OCR -> MangaOcrPageEngine.process(
                     getApplication(), page, sourceScript, ModelPackId.MANGA_OCR_JAPANESE,
-                )
-                OcrProvider.MANGA_OCR_MULTI -> BaberuOcrPageEngine.process(
-                    getApplication(), page, sourceScript, ModelPackId.BABERU_OCR_MULTILINGUAL,
                 )
             }
             val manualBlocks = page.blocks.filter { it.eraseBounds == null }

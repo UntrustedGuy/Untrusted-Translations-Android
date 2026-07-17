@@ -174,10 +174,9 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                         ModelPackCard(vm, ModelPackId.RAPID_OCR_LATIN)
                     }
                     OcrProvider.MANGA_OCR -> ModelPackCard(vm, ModelPackId.MANGA_OCR_JAPANESE)
-                    OcrProvider.MANGA_OCR_MULTI -> ModelPackCard(vm, ModelPackId.BABERU_OCR_MULTILINGUAL)
                     OcrProvider.RAPID_OCR_V5 -> {
                         Text(
-                            "PP-OCRv5 models from HuggingFace — improved detection. Experimental.",
+                            "PP-OCRv5 models from HuggingFace ï¿½ improved detection. Experimental.",
                             color = AppColors.Muted,
                             style = MaterialTheme.typography.bodySmall,
                         )

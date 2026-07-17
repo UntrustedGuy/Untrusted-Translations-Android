@@ -10,7 +10,6 @@ enum class OcrProvider(val label: String) {
     RAPID_OCR("RapidOCR pack (download)"),
     RAPID_OCR_V5("RapidOCR PP-OCRv5 (download / experimental)"),
     MANGA_OCR("Manga-OCR (download / experimental / Japanese)"),
-    MANGA_OCR_MULTI("Manga-OCR Multi (download / experimental / JPN+CHN+ENG)"),
 }
 
 enum class TranslationProvider(val label: String, val paid: Boolean = false) {

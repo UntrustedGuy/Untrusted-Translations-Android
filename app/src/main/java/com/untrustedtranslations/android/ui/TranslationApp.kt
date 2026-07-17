@@ -144,6 +144,11 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text("OCR engine", fontWeight = FontWeight.Bold, color = AppColors.Cyan)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("[LOW] ML Kit", color = AppColors.Muted, style = MaterialTheme.typography.labelSmall)
+                    Text("[MID] RapidOCR / PP-OCRv5", color = AppColors.Muted, style = MaterialTheme.typography.labelSmall)
+                    Text("[HIGH] Gemini / Vision", color = AppColors.Violet, style = MaterialTheme.typography.labelSmall)
+                }
                 Selector(
                     label = "Detect text with",
                     value = vm.ocrProvider.label,
@@ -190,6 +195,11 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                 }
 
                 Text("Translation engine", fontWeight = FontWeight.Bold, color = AppColors.Cyan)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("[LOW] ML Kit", color = AppColors.Muted, style = MaterialTheme.typography.labelSmall)
+                    Text("[MID] Google / Local AI", color = AppColors.Muted, style = MaterialTheme.typography.labelSmall)
+                    Text("[HIGH] Gemini / NLLB / Paid API", color = AppColors.Violet, style = MaterialTheme.typography.labelSmall)
+                }
                 Selector(
                     label = "Translate text with",
                     value = vm.translationProvider.label,

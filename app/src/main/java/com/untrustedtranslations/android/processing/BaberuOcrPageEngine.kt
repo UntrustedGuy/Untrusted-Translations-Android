@@ -17,6 +17,7 @@ import java.nio.LongBuffer
 import java.util.UUID
 import kotlin.math.*
 
+@Deprecated("Recognition not wired — kept for future use")
 internal object BaberuOcrPageEngine {
     private data class Det(val rect: Rect, val score: Float)
 

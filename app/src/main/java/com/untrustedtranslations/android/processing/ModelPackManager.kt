@@ -228,7 +228,7 @@ object ModelPackManager {
         PackFile(
             "det.onnx",
             "$RAPID_BASE/onnx/PP-OCRv4/det/multi_PP-OCRv3_det_mobile.onnx",
-            "5582933662898cd2b4c2eae8a7e5e4fbdff84773711f29db00a1cbd185059001",
+            "5475c6c7f4d84a6c4f32241b487435d59f126a40c023387af99732258844cdc3",
         ),
         PackFile(
             "cls.onnx",

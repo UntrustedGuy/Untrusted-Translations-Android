@@ -1,17 +1,17 @@
 # Untrusted Translations
 
-A translation workspace for Android that actually respects your time. Import a comic or a single page, let the app find the text, fix what the machine got wrong, and replace the original lettering — all on your phone.
+A translation workspace for Android. Import a comic or a single page, let the app find the text, fix what the traslator got wrong, and replace the original lettering — all on your phone.
 
-The app never turns the page on its own. **You decide when to move forward. Tap Save & Next when you're ready.**
+App can also be used to change text on images.
 
 ---
 
 ## What's here
 
-- **Import** PNG, JPEG, WebP, PDF, CBZ, or ZIP files through the system file picker. Archives are sorted naturally (page 2 comes before page 10).
+- **Import** PNG, JPEG, WebP, PDF, CBZ, ZIP files and folder with images through the system file picker and Folder picker. Archives are sorted naturally (page 2 comes before page 10).
 - **PDF support** — renders PDFs into editable page images.
 - **6 different OCR engines** — pick what works for your comic:
-  - Gemini Free — reads the whole page like a person would, ignores sound effects
+  - Gemini Free**Best as of now** — reads the whole page like a person would, ignores sound effects
   - Google ML Kit — built-in, no downloads, good enough for clean print
   - RapidOCR — neural OCR you download as a small pack (Japanese, Korean, Chinese, or Latin)
   - PP-OCRv5 — same idea but newer models from HuggingFace
@@ -26,19 +26,19 @@ The app never turns the page on its own. **You decide when to move forward. Tap 
   - OpenAI API — bring your own key (costs money)
   - Claude API — bring your own key (costs money)
   - Custom API — any OpenAI-compatible endpoint
-- **Sound effects are intentionally ignored.** Nobody wants SFX detected.
+- **Sound effects are intentionally ignored.** Cause I don't want SFX detected.
 - **Everything is editable** — wrong OCR text, bad translation, font, size, rotation, alignment, color, bold, italic, vertical layout.
 - **Move, resize, rotate** each text box directly on the page.
 - **Undo and redo** in the editor.
 - **Autosave** — pick up where you left off, or delete old projects.
 - **Export** keeps the original format: PNG stays PNG, PDF stays PDF, etc.
-- **Home button** in the page viewer to jump back to your project list.
+- **Home button** in the page viewer to jump back to your project list. This will auto save your progess.
 
 ---
 
 ## Quick start
 
-1. Pick the source script, source language, and target language on the import screen.
+1. Pick the source script(This is the lang your source is in. This is for OCR.), source language(This is the lang you are translating from.), and target language(The lang you want to translate to.) on the import screen.
 2. Tap the gear icon to choose your OCR and translation engines. Download any model packs you want.
 3. Import a file or folder.
 4. The app detects and translates the current page.

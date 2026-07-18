@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,6 +22,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -250,25 +252,8 @@ fun ManipulablePagePreview(
                                 .background(Color(0xB3FFFFFF)),
                         )
                     }
-                    Text(
-                        text = liveBlock.translatedText,
-                        color = Color(liveBlock.style.textColorArgb.toInt()),
-                        fontSize = liveFontSizeSp.coerceIn(4f, 160f).sp,
-                        fontFamily = when (liveBlock.style.font) {
-                            FontChoice.AUTO, FontChoice.SANS -> FontFamily.Default
-                            FontChoice.SERIF -> FontFamily.Serif
-                            FontChoice.CONDENSED -> FontFamily(Typeface.create("sans-serif-condensed", Typeface.NORMAL))
-                            FontChoice.MONOSPACE -> FontFamily.Monospace
-                            FontChoice.CASUAL -> FontFamily(Typeface.create("casual", Typeface.NORMAL))
-                            FontChoice.MANGA -> mangaFont
-                        },
-                        fontWeight = if (liveBlock.style.bold) FontWeight.Bold else FontWeight.Normal,
-                        fontStyle = if (liveBlock.style.italic) FontStyle.Italic else FontStyle.Normal,
-                        textAlign = when (liveBlock.style.alignment) {
-                            com.untrustedtranslations.android.model.TextAlignmentChoice.START -> TextAlign.Start
-                            com.untrustedtranslations.android.model.TextAlignmentChoice.CENTER -> TextAlign.Center
-                            com.untrustedtranslations.android.model.TextAlignmentChoice.END -> TextAlign.End
-                        },
+                    Box(
+                        contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .offset {
                                 IntOffset(liveRect.left.roundToInt(), liveRect.top.roundToInt())
@@ -279,9 +264,36 @@ fun ManipulablePagePreview(
                                 liveBlock.style.backgroundColorArgb?.let { Color(it.toInt()) }
                                     ?: Color(0xB3FFFFFF),
                                 RoundedCornerShape(6.dp),
-                            )
-                            .padding(4.dp),
-                    )
+                            ),
+                    ) {
+                        Text(
+                            text = if (liveBlock.style.vertical) {
+                                liveBlock.translatedText.lines().joinToString("\n") { line ->
+                                    line.trim().toCharArray().joinToString("\n")
+                                }
+                            } else {
+                                liveBlock.translatedText
+                            },
+                            color = Color(liveBlock.style.textColorArgb.toInt()),
+                            fontSize = liveFontSizeSp.coerceIn(4f, 160f).sp,
+                            fontFamily = when (liveBlock.style.font) {
+                                FontChoice.AUTO, FontChoice.SANS -> FontFamily.Default
+                                FontChoice.SERIF -> FontFamily.Serif
+                                FontChoice.CONDENSED -> FontFamily(Typeface.create("sans-serif-condensed", Typeface.NORMAL))
+                                FontChoice.MONOSPACE -> FontFamily.Monospace
+                                FontChoice.CASUAL -> FontFamily(Typeface.create("casual", Typeface.NORMAL))
+                                FontChoice.MANGA -> mangaFont
+                            },
+                            fontWeight = if (liveBlock.style.bold) FontWeight.Bold else FontWeight.Normal,
+                            fontStyle = if (liveBlock.style.italic) FontStyle.Italic else FontStyle.Normal,
+                            textAlign = when (liveBlock.style.alignment) {
+                                com.untrustedtranslations.android.model.TextAlignmentChoice.START -> TextAlign.Start
+                                com.untrustedtranslations.android.model.TextAlignmentChoice.CENTER -> TextAlign.Center
+                                com.untrustedtranslations.android.model.TextAlignmentChoice.END -> TextAlign.End
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(4.dp),
+                        )
+                    }
                 }
                 Canvas(Modifier.fillMaxSize()) {
                     val geometry = pageImageGeometry(

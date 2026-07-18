@@ -24,7 +24,7 @@ These weights are not in the APK. The app downloads the selected files from the 
 | --- | --- |
 | RapidOCR converted PaddleOCR models | RapidAI team and PaddleOCR/Baidu contributors. RapidOCR engineering and PaddleOCR are Apache License 2.0; upstream notes that OCR model copyright is held by Baidu. <https://github.com/RapidAI/RapidOCR>, <https://github.com/PaddlePaddle/PaddleOCR>, <https://www.modelscope.cn/models/RapidAI/RapidOCR> |
 | `monkt/paddleocr-onnx` PP-OCRv5 conversions | Credited to monkt and the PaddleOCR authors; model/conversion repository: <https://huggingface.co/monkt/paddleocr-onnx>. PaddleOCR upstream is Apache License 2.0. |
-| Manga-OCR Japanese | Original Manga OCR by kha-white, Apache License 2.0: <https://github.com/kha-white/manga-ocr>. ONNX conversion/files by l0wgear: <https://huggingface.co/l0wgear/manga-ocr-2025-onnx>. |
+| Manga-OCR Japanese | Original Manga-OCR by kha-white, Apache License 2.0: <https://github.com/kha-white/manga-ocr>. The downloaded checkpoint includes the 2025 fine-tune by jzhang533: <https://huggingface.co/jzhang533/manga-ocr-base-2025>, exported to ONNX and published by l0wgear: <https://huggingface.co/l0wgear/manga-ocr-2025-onnx>. |
 | Comic text and bubble detector | Model by ogkalu, fine-tuned RT-DETR-v2 comic dialogue detector; Apache License 2.0: <https://huggingface.co/ogkalu/comic-text-and-bubble-detector>. |
 | Baberu OCR | Model/code by genshiai-daichi; Apache License 2.0. The model card also acknowledges DINOv2, Manga-OCR, and PaddleOCR-VL teachers: <https://huggingface.co/genshiai-daichi/baberu-ocr>. |
 

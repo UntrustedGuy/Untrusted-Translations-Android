@@ -67,6 +67,7 @@ object OcrTranslationEngine {
                     true,
                 )
                 val thresholded = mangaContrast(enlarged)
+                val inverted = mangaContrast(enlarged, invert = true)
                 try {
                     val tileResult = recognizer.process(InputImage.fromBitmap(enlarged, 0)).await()
                     candidates += extract(
@@ -86,14 +87,24 @@ object OcrTranslationEngine {
                         tileRect.left,
                         tileRect.top,
                     )
+                    val invertedResult = recognizer.process(InputImage.fromBitmap(inverted, 0)).await()
+                    candidates += extract(
+                        invertedResult,
+                        bitmap.width,
+                        bitmap.height,
+                        scale,
+                        tileRect.left,
+                        tileRect.top,
+                    )
                 } finally {
+                    inverted.recycle()
                     thresholded.recycle()
                     enlarged.recycle()
                     tile.recycle()
                 }
             }
             }
-            mergeDetections(candidates).filterNot(::looksLikeSoundEffect)
+            mergeDetections(candidates, bitmap.width, bitmap.height, script).filterNot(::looksLikeSoundEffect)
         } finally {
             recognizer.close()
         }
@@ -133,22 +144,55 @@ object OcrTranslationEngine {
         }
     }
 
-    private fun mangaContrast(source: Bitmap): Bitmap {
+    private fun mangaContrast(source: Bitmap, invert: Boolean = false): Bitmap {
         val width = source.width
         val height = source.height
         val pixels = IntArray(width * height)
         source.getPixels(pixels, 0, width, 0, 0, width, height)
+        val luminances = IntArray(pixels.size)
         pixels.indices.forEach { index ->
             val color = pixels[index]
-            val alpha = color ushr 24
             val red = color ushr 16 and 0xFF
             val green = color ushr 8 and 0xFF
             val blue = color and 0xFF
-            val luminance = (red * 299 + green * 587 + blue * 114) / 1000
-            val value = if (luminance >= 178) 255 else 0
+            luminances[index] = (red * 299 + green * 587 + blue * 114) / 1000
+        }
+        val threshold = otsuThreshold(luminances)
+        pixels.indices.forEach { index ->
+            val alpha = pixels[index] ushr 24
+            val bright = luminances[index] >= threshold
+            val value = if (bright != invert) 255 else 0
             pixels[index] = (alpha shl 24) or (value shl 16) or (value shl 8) or value
         }
         return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+    }
+
+    private fun otsuThreshold(luminances: IntArray): Int {
+        val histogram = IntArray(256)
+        luminances.forEach { histogram[it]++ }
+        val total = luminances.size
+        var sum = 0L
+        for (level in 0..255) sum += level.toLong() * histogram[level]
+        var sumBackground = 0L
+        var weightBackground = 0
+        var bestVariance = -1.0
+        var threshold = 127
+        for (level in 0..255) {
+            weightBackground += histogram[level]
+            if (weightBackground == 0) continue
+            val weightForeground = total - weightBackground
+            if (weightForeground == 0) break
+            sumBackground += level.toLong() * histogram[level]
+            val meanBackground = sumBackground.toDouble() / weightBackground
+            val meanForeground = (sum - sumBackground).toDouble() / weightForeground
+            val betweenVariance = weightBackground.toDouble() * weightForeground *
+                (meanBackground - meanForeground) * (meanBackground - meanForeground)
+            if (betweenVariance > bestVariance) {
+                bestVariance = betweenVariance
+                threshold = level
+            }
+        }
+        return threshold
     }
 
     private fun extract(
@@ -199,7 +243,12 @@ object OcrTranslationEngine {
         )
     }
 
-    private fun mergeDetections(candidates: List<Detection>): List<Detection> {
+    private fun mergeDetections(
+        candidates: List<Detection>,
+        pageWidth: Int,
+        pageHeight: Int,
+        script: SourceScript,
+    ): List<Detection> {
         val merged = mutableListOf<Detection>()
         candidates.forEach { candidate ->
             val candidateKey = normalizedText(candidate.text)
@@ -218,14 +267,82 @@ object OcrTranslationEngine {
                     candidateLength >= (existingLength * 1.25f)
                 val isMoreConfident = relatedText && candidate.confidence >= existing.confidence + .18f &&
                     candidateLength >= existingLength
-                if (isMoreComplete || isMoreConfident) {
-                    merged[duplicate] = candidate
+                if (isMoreComplete || isMoreConfident) merged[duplicate] = candidate
+            }
+        }
+        val grouped = mergeNeighbors(merged, pageWidth, pageHeight, script)
+        return if (script == SourceScript.JAPANESE) {
+            grouped.sortedWith(compareByDescending<Detection> { it.pixelBox.right }.thenBy { it.pixelBox.top })
+        } else {
+            grouped.sortedWith(compareBy<Detection> { it.pixelBox.top }.thenBy { it.pixelBox.left })
+        }
+    }
+
+    /** Joins line/column fragments conservatively before SFX filtering and translation. */
+    private fun mergeNeighbors(
+        detections: List<Detection>,
+        pageWidth: Int,
+        pageHeight: Int,
+        script: SourceScript,
+    ): List<Detection> {
+        val pool = detections.toMutableList()
+        var changed = true
+        while (changed) {
+            changed = false
+            outer@ for (i in pool.indices) {
+                for (j in i + 1 until pool.size) {
+                    val a = pool[i]
+                    val b = pool[j]
+                    if (!areSameBubbleFragments(a.pixelBox, b.pixelBox, script)) continue
+                    val ordered = if (script == SourceScript.JAPANESE) {
+                        if (a.pixelBox.centerX() >= b.pixelBox.centerX()) listOf(a, b) else listOf(b, a)
+                    } else {
+                        if (a.pixelBox.top <= b.pixelBox.top) listOf(a, b) else listOf(b, a)
+                    }
+                    val box = Rect(
+                        minOf(a.pixelBox.left, b.pixelBox.left),
+                        minOf(a.pixelBox.top, b.pixelBox.top),
+                        maxOf(a.pixelBox.right, b.pixelBox.right),
+                        maxOf(a.pixelBox.bottom, b.pixelBox.bottom),
+                    )
+                    val separator = if (script == SourceScript.JAPANESE || script == SourceScript.CHINESE) "" else " "
+                    pool[i] = Detection(
+                        text = ordered.joinToString(separator) { it.text }.trim(),
+                        bounds = RelativeBounds(
+                            box.left / pageWidth.toFloat(), box.top / pageHeight.toFloat(),
+                            box.right / pageWidth.toFloat(), box.bottom / pageHeight.toFloat(),
+                        ),
+                        pixelBox = box,
+                        cornerPoints = null,
+                        confidence = minOf(a.confidence, b.confidence),
+                    )
+                    pool.removeAt(j)
+                    changed = true
+                    break@outer
                 }
             }
         }
-        return merged.sortedWith(compareBy<Detection> { it.pixelBox.top }.thenBy { it.pixelBox.left })
+        return pool
     }
 
+    private fun areSameBubbleFragments(first: Rect, second: Rect, script: SourceScript): Boolean {
+        if (script == SourceScript.JAPANESE) {
+            val overlap = minOf(first.bottom, second.bottom) - maxOf(first.top, second.top)
+            val smallerHeight = minOf(first.height(), second.height()).coerceAtLeast(1)
+            val smallerWidth = minOf(first.width(), second.width()).coerceAtLeast(1)
+            val gap = if (first.left <= second.left) second.left - first.right else first.left - second.right
+            val heightRatio = maxOf(first.height(), second.height()).toFloat() / smallerHeight
+            return overlap.toFloat() / smallerHeight > .65f &&
+                gap >= -smallerWidth * .25f && gap < smallerWidth * .55f && heightRatio < 2f
+        }
+        val overlap = minOf(first.right, second.right) - maxOf(first.left, second.left)
+        val smallerWidth = minOf(first.width(), second.width()).coerceAtLeast(1)
+        val smallerHeight = minOf(first.height(), second.height()).coerceAtLeast(1)
+        val gap = if (first.top <= second.top) second.top - first.bottom else first.top - second.bottom
+        val widthRatio = maxOf(first.width(), second.width()).toFloat() / smallerWidth
+        return overlap.toFloat() / smallerWidth > .7f &&
+            gap >= -smallerHeight * .25f && gap < smallerHeight * .45f && widthRatio < 2.5f
+    }
     private fun normalizedText(value: String): String = value.lowercase().filter { it.isLetterOrDigit() }
 
     private fun textsAreRelated(first: String, second: String): Boolean {

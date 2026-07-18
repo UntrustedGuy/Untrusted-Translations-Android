@@ -202,7 +202,9 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                 Selector(
                     label = "Translate text with",
                     value = vm.translationProvider.label,
-                    options = TranslationProvider.entries.map { it.label },
+                    options = TranslationProvider.entries
+                        .filter { it != TranslationProvider.LOCAL_AI }
+                        .map { it.label },
                 ) { label ->
                     vm.chooseTranslationProvider(
                         TranslationProvider.entries.first { it.label == label },
@@ -210,7 +212,7 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                 }
                 when (vm.translationProvider) {
                     TranslationProvider.NLLB -> ModelPackCard(vm, ModelPackId.NLLB_TRANSLATION)
-                    TranslationProvider.LOCAL_AI -> ModelPackCard(vm, ModelPackId.LOCAL_AI_NLLB)
+                    TranslationProvider.LOCAL_AI -> Unit
                     TranslationProvider.GOOGLE_UNOFFICIAL -> ProviderNote(
                         "Unofficial / experimental. Free and needs no key or login, but Google can change or block it at any time. No cookies are used.",
                         warning = true,

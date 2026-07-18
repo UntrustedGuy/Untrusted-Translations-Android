@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.UntrustedTranslations" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.UntrustedTranslations" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#6C5CE7</item>
-        <item name="android:navigationBarColor">#FAF9FF</item>
-        <item name="android:statusBarColor">#FAF9FF</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorAccent">#9B7BFF</item>
+        <item name="android:windowBackground">#09090D</item>
+        <item name="android:navigationBarColor">#09090D</item>
+        <item name="android:statusBarColor">#09090D</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

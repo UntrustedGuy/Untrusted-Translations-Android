@@ -1,5 +1,6 @@
 package com.untrustedtranslations.android.processing
 
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import com.untrustedtranslations.android.model.SourceScript
@@ -16,6 +17,7 @@ internal object VisionLlmRuntime {
     private var loadedPack: ModelPackId? = null
 
     private external fun nativeLoad(modelPath: String, projectorPath: String, nativeLibraryDir: String): Int
+    private external fun nativeLastError(): String?
     private external fun nativeRead(rgb: ByteArray, width: Int, height: Int, prompt: String): String?
     private external fun nativeUnload()
 
@@ -52,12 +54,40 @@ internal object VisionLlmRuntime {
         if (loadedPack == pack) return
         if (loadedPack != null) nativeUnload()
         val directory = ModelPackManager.directory(context, pack)
+        val model = directory.resolve("model.gguf")
+        val projector = directory.resolve("mmproj.gguf")
+        require(model.length() >= 900_000_000L && projector.length() >= 650_000_000L) {
+            "The Vision High download is incomplete. Delete the pack and download it again; partial downloads will resume."
+        }
         val result = nativeLoad(
-            directory.resolve("model.gguf").absolutePath,
-            directory.resolve("mmproj.gguf").absolutePath,
+            model.absolutePath,
+            projector.absolutePath,
             context.applicationInfo.nativeLibraryDir,
         )
-        check(result == 0) { "Could not load the local vision model (error $result)." }
+        if (result != 0) {
+            val availableMb = ActivityManager.MemoryInfo().also {
+                context.getSystemService(ActivityManager::class.java).getMemoryInfo(it)
+            }.availMem / 1_048_576L
+            val nativeDetail = nativeLastError()
+                ?.lineSequence()
+                ?.map(String::trim)
+                ?.filter(String::isNotBlank)
+                ?.toList()
+                ?.takeLast(2)
+                ?.joinToString(" ")
+                .orEmpty()
+            val stage = when (result) {
+                1 -> "the 986 MB text model"
+                2 -> "the text context"
+                3 -> "the 710 MB vision projector"
+                else -> "the vision runtime"
+            }
+            error(
+                "Could not load $stage. Available memory: ${availableMb} MB. " +
+                    "Close other apps or restart the phone; if this continues, delete and redownload Vision High." +
+                    nativeDetail.takeIf { it.isNotBlank() }?.let { " Native detail: $it" }.orEmpty(),
+            )
+        }
         loadedPack = pack
     }
 

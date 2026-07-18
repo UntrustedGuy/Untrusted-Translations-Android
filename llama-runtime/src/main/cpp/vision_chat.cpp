@@ -19,6 +19,19 @@ static llama_model * model = nullptr;
 static llama_context * lctx = nullptr;
 static mtmd_context * vision = nullptr;
 static common_chat_templates_ptr templates;
+static std::string last_error;
+
+static void vision_log_callback(enum ggml_log_level level, const char * text, void *) {
+    __android_log_print(
+        level >= GGML_LOG_LEVEL_ERROR ? ANDROID_LOG_ERROR : ANDROID_LOG_DEBUG,
+        TAG,
+        "%s",
+        text);
+    if (level == GGML_LOG_LEVEL_ERROR || (level == GGML_LOG_LEVEL_CONT && !last_error.empty())) {
+        last_error += text;
+        if (last_error.size() > 2048) last_error.erase(0, last_error.size() - 2048);
+    }
+}
 
 static void free_all() {
     templates.reset();
@@ -31,20 +44,26 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_untrustedtranslations_android_processing_VisionLlmRuntime_nativeLoad(
         JNIEnv * env, jobject, jstring model_path_j, jstring projector_path_j, jstring lib_dir_j) {
     free_all();
+    last_error.clear();
+    llama_log_set(vision_log_callback, nullptr);
     const char * lib_dir = env->GetStringUTFChars(lib_dir_j, nullptr);
     ggml_backend_load_all_from_path(lib_dir);
     env->ReleaseStringUTFChars(lib_dir_j, lib_dir);
     llama_backend_init();
 
     const char * model_path = env->GetStringUTFChars(model_path_j, nullptr);
-    model = llama_model_load_from_file(model_path, llama_model_default_params());
+    auto model_params = llama_model_default_params();
+    model_params.n_gpu_layers = 0;
+    model_params.use_extra_bufts = false;
+    model_params.use_mmap = true;
+    model = llama_model_load_from_file(model_path, model_params);
     env->ReleaseStringUTFChars(model_path_j, model_path);
     if (!model) return 1;
 
     auto cp = llama_context_default_params();
-    cp.n_ctx = 4096;
-    cp.n_batch = 512;
-    cp.n_ubatch = 512;
+    cp.n_ctx = 2048;
+    cp.n_batch = 256;
+    cp.n_ubatch = 128;
     cp.n_threads = std::max(2, std::min(4, (int) sysconf(_SC_NPROCESSORS_ONLN) - 1));
     cp.n_threads_batch = cp.n_threads;
     lctx = llama_init_from_model(model, cp);
@@ -57,12 +76,18 @@ Java_com_untrustedtranslations_android_processing_VisionLlmRuntime_nativeLoad(
     mp.n_threads = cp.n_threads;
     mp.warmup = false;
     mp.image_min_tokens = 64;
-    mp.image_max_tokens = 512;
+    mp.image_max_tokens = 256;
     vision = mtmd_init_from_file(projector_path, model, mp);
     env->ReleaseStringUTFChars(projector_path_j, projector_path);
     if (!vision || !mtmd_support_vision(vision)) { free_all(); return 3; }
     templates = common_chat_templates_init(model, "");
     return 0;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_untrustedtranslations_android_processing_VisionLlmRuntime_nativeLastError(
+        JNIEnv * env, jobject) {
+    return env->NewStringUTF(last_error.c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

@@ -78,8 +78,8 @@ internal object BlockGrouping {
         val height = block.bounds.bottom - block.bounds.top
         val punctuation = block.originalText.count { !it.isLetterOrDigit() && !it.isWhitespace() }
         val repeated = compact.groupingBy { it }.eachCount().values.maxOrNull() ?: 0
-        compact.length < 2 || punctuation > compact.length ||
-            (compact.length <= 5 && repeated >= compact.length - 1) ||
-            (compact.length <= 4 && width > height * 2.8f)
+        compact.isEmpty() || punctuation > compact.length * 2 ||
+            (compact.length in 5..10 && compact.toSet().size <= 2 && repeated >= compact.length - 1) ||
+            (compact.length in 2..4 && width > height * 3.5f && repeated == compact.length)
     }
 }

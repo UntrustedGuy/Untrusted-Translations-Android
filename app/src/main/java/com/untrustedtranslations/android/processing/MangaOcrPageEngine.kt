@@ -6,93 +6,225 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Rect
-import com.untrustedtranslations.android.model.*
+import com.untrustedtranslations.android.model.ComicPage
+import com.untrustedtranslations.android.model.RelativeBounds
+import com.untrustedtranslations.android.model.SourceScript
+import com.untrustedtranslations.android.model.TextBlock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.io.File
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
+import java.text.Normalizer
 import java.util.UUID
-import kotlin.math.*
+import kotlin.math.exp
 
 internal object MangaOcrPageEngine {
-    private data class Det(val rect: Rect, val score: Float)
+    private const val START_TOKEN = 2L
+    private const val END_TOKEN = 3L
+    private const val MAX_TOKENS = 160
 
-    suspend fun process(ctx: Context, page: ComicPage, script: SourceScript, pack: ModelPackId): List<TextBlock> = withContext(Dispatchers.IO) {
-        val dir = ModelPackManager.directory(ctx, pack)
-        require(ModelPackManager.isInstalled(ctx, pack)) { "Manga-OCR pack not installed" }
-        val bmp = ctx.contentResolver.openInputStream(page.originalSource)?.use(BitmapFactory::decodeStream) ?: error("Cannot open page")
-        val dets = findText(ctx, bmp)
-        dets.mapNotNull { d ->
-            val b = RelativeBounds(d.rect.left.toFloat() / bmp.width, d.rect.top.toFloat() / bmp.height, d.rect.right.toFloat() / bmp.width, d.rect.bottom.toFloat() / bmp.height)
-            TextBlock(id = UUID.randomUUID().toString(), originalText = "", translatedText = "", bounds = b, eraseBounds = b, style = LetteringStyleEstimator.estimate(ctx, bmp, d.rect, "", script, null))
-        }.sortedWith { a, b -> val r = a.bounds.top.compareTo(b.bounds.top); if (r != 0) r else a.bounds.left.compareTo(b.bounds.left) }
-    }
+    private data class Reading(val text: String, val confidence: Float)
 
-    private fun findText(ctx: Context, bmp: Bitmap): List<Det> {
-        val ids = listOf(ModelPackId.RAPID_OCR_JAPANESE, ModelPackId.RAPID_OCR_KOREAN, ModelPackId.RAPID_OCR_CHINESE, ModelPackId.RAPID_OCR_LATIN, ModelPackId.RAPID_OCR_V5_JAPANESE, ModelPackId.RAPID_OCR_V5_KOREAN, ModelPackId.RAPID_OCR_V5_CHINESE, ModelPackId.RAPID_OCR_V5_LATIN)
-        for (rid in ids) {
-            val f = File(ModelPackManager.directory(ctx, rid), "det.onnx")
-            if (f.isFile) return dbnetDetect(f, bmp)
+    suspend fun process(
+        context: Context,
+        page: ComicPage,
+        script: SourceScript,
+        pack: ModelPackId,
+    ): List<TextBlock> = withContext(Dispatchers.IO) {
+        require(script == SourceScript.JAPANESE) { "Manga-OCR supports Japanese text only." }
+        require(ModelPackManager.isInstalled(context, pack)) { "Manga-OCR pack not installed." }
+        val directory = ModelPackManager.directory(context, pack)
+        val bitmap = context.contentResolver.openInputStream(page.originalSource)
+            ?.use(BitmapFactory::decodeStream)
+            ?: error("Cannot open page.")
+        try {
+            val regions = ComicDialogueDetector.detect(
+                "${pack.name}_comic_dialogue_detector",
+                java.io.File(directory, "comic_dialogue_detector.onnx"),
+                bitmap,
+            )
+            val environment = OnnxSessionCache.environment
+            val encoder = OnnxSessionCache.getOrCreate(
+                "${pack.name}_encoder",
+                java.io.File(directory, "encoder_model.onnx"),
+            )
+            val decoder = OnnxSessionCache.getOrCreate(
+                "${pack.name}_decoder",
+                java.io.File(directory, "decoder_model.onnx"),
+            )
+            validateModelContract(encoder, decoder)
+            val vocabulary = java.io.File(directory, "vocab.txt").readLines(Charsets.UTF_8)
+            val blocks = regions.mapNotNull { region ->
+                val recognitionRect = paddedCrop(region.rect, bitmap.width, bitmap.height)
+                val crop = Bitmap.createBitmap(
+                    bitmap,
+                    recognitionRect.left,
+                    recognitionRect.top,
+                    recognitionRect.width(),
+                    recognitionRect.height(),
+                )
+                val reading = try {
+                    recognize(environment, encoder, decoder, crop, vocabulary)
+                } finally {
+                    crop.recycle()
+                }
+                if (reading.text.isBlank() || reading.confidence < .18f) return@mapNotNull null
+                val bounds = RelativeBounds(
+                    region.rect.left / bitmap.width.toFloat(),
+                    region.rect.top / bitmap.height.toFloat(),
+                    region.rect.right / bitmap.width.toFloat(),
+                    region.rect.bottom / bitmap.height.toFloat(),
+                )
+                TextBlock(
+                    id = UUID.randomUUID().toString(),
+                    originalText = reading.text,
+                    translatedText = reading.text,
+                    bounds = bounds,
+                    eraseBounds = bounds,
+                    style = LetteringStyleEstimator.estimate(
+                        context,
+                        bitmap,
+                        region.rect,
+                        reading.text,
+                        script,
+                        null,
+                    ),
+                )
+            }
+            // Each region is already one speech-bubble text block. Grouping here could merge
+            // adjacent bubbles and heuristic filtering could discard legitimate one-character replies.
+            ReadingOrder.sort(blocks, script)
+        } finally {
+            bitmap.recycle()
         }
-        return edgeDetect(bmp)
     }
 
-    private fun dbnetDetect(f: File, bmp: Bitmap): List<Det> = try {
-        val env = OrtEnvironment.getEnvironment(); val sess = env.createSession(f.absolutePath)
-        val sc = min(1f, 1280f / max(bmp.width, bmp.height)); val w = ceil(bmp.width * sc / 32f).toInt().coerceAtLeast(32) * 32; val h = ceil(bmp.height * sc / 32f).toInt().coerceAtLeast(32) * 32
-        val r = Bitmap.createScaledBitmap(bmp, w, h, true); val px = IntArray(w * h); r.getPixels(px, 0, w, 0, 0, w, h); val d = FloatArray(w * h * 3)
-        for (i in px.indices) { d[i] = (px[i] and 255) / 255f; d[w * h + i] = (px[i] shr 8 and 255) / 255f; d[2 * w * h + i] = (px[i] shr 16 and 255) / 255f }
-        OnnxTensor.createTensor(env, FloatBuffer.wrap(d), longArrayOf(1, 3, h.toLong(), w.toLong())).use { inp -> sess.run(mapOf(sess.inputNames.first() to inp)).use { res ->
-            val o = res[0].value as Array<Array<Array<FloatArray>>>; return components(o[0][0], bmp.width, bmp.height)
-        }}
-    } catch (_: Exception) { edgeDetect(bmp) }
-
-    private fun components(m: Array<FloatArray>, sw: Int, sh: Int): List<Det> {
-        val h = m.size; val w = m.firstOrNull()?.size ?: return emptyList(); val act = BooleanArray(w * h)
-        for (y in 1 until h - 1) for (x in 1 until w - 1) if (m[y][x] >= 0.30f && m[y][x] >= m[y - 1][x] && m[y][x] >= m[y + 1][x] && m[y][x] >= m[y][x - 1] && m[y][x] >= m[y][x + 1]) act[y * w + x] = true
-        val vis = BooleanArray(act.size); val q = IntArray(act.size); val dets = mutableListOf<Det>()
-        for (st in act.indices) { if (!act[st] || vis[st]) continue; var hd = 0; var tl = 0; q[tl++] = st; vis[st] = true
-            var mnX = w; var mnY = h; var mxX = 0; var mxY = 0; var px = 0; var ss = 0f
-            while (hd < tl) { val idx = q[hd++]; val x = idx % w; val y = idx / w; mnX = min(mnX, x); mxX = max(mxX, x); mnY = min(mnY, y); mxY = max(mxY, y); ss += m[y][x]; px++
-                for (n in intArrayOf(idx - 1, idx + 1, idx - w, idx + w)) { if (n in act.indices && !vis[n] && act[n]) { vis[n] = true; q[tl++] = n } } }
-            val cw = mxX - mnX + 1; val ch = mxY - mnY + 1; if (px < 10 || cw < 4 || ch < 4) continue
-            val ex = (cw * 0.18f).roundToInt().coerceAtLeast(2); val ey = (ch * 0.18f).roundToInt().coerceAtLeast(2)
-            val l = ((mnX - ex).coerceAtLeast(0) * sw / w.toFloat()).roundToInt(); val t = ((mnY - ey).coerceAtLeast(0) * sh / h.toFloat()).roundToInt()
-            val r = (((mxX + ex + 1).coerceAtMost(w)) * sw / w.toFloat()).roundToInt(); val b = (((mxY + ey + 1).coerceAtMost(h)) * sh / h.toFloat()).roundToInt()
-            if (r - l >= 8 && b - t >= 8) dets += Det(Rect(l, t, r, b), ss / px) }
-        return mergeDets(dets)
+    private fun paddedCrop(rect: android.graphics.Rect, pageWidth: Int, pageHeight: Int): android.graphics.Rect {
+        val horizontalPadding = maxOf(12, rect.width() / 2)
+        val verticalPadding = maxOf(8, rect.height() / 8)
+        return android.graphics.Rect(
+            (rect.left - horizontalPadding).coerceAtLeast(0),
+            (rect.top - verticalPadding).coerceAtLeast(0),
+            (rect.right + horizontalPadding).coerceAtMost(pageWidth),
+            (rect.bottom + verticalPadding).coerceAtMost(pageHeight),
+        )
     }
 
-    private fun edgeDetect(bmp: Bitmap): List<Det> {
-        val w = bmp.width; val h = bmp.height; val px = IntArray(w * h); bmp.getPixels(px, 0, w, 0, 0, w, h)
-        val g = IntArray(px.size) { val c = px[it]; ((c and 255) * 0.299 + (c shr 8 and 255) * 0.587 + (c shr 16 and 255) * 0.114).toInt() }; val e = BooleanArray(g.size)
-        for (y in 1 until h - 1) for (x in 1 until w - 1) {
-            val gx = g[(y - 1) * w + (x + 1)] + 2 * g[y * w + (x + 1)] + g[(y + 1) * w + (x + 1)] - g[(y - 1) * w + (x - 1)] - 2 * g[y * w + (x - 1)] - g[(y + 1) * w + (x - 1)]
-            val gy = g[(y + 1) * w + (x - 1)] + 2 * g[(y + 1) * w + x] + g[(y + 1) * w + (x + 1)] - g[(y - 1) * w + (x - 1)] - 2 * g[(y - 1) * w + x] - g[(y - 1) * w + (x + 1)]
-            e[y * w + x] = sqrt((gx * gx + gy * gy).toFloat()) > 40f }
-        val vis = BooleanArray(e.size); val q = IntArray(e.size); val dets = mutableListOf<Det>()
-        for (st in e.indices) { if (!e[st] || vis[st]) continue; var hd = 0; var tl = 0; q[tl++] = st; vis[st] = true
-            var mnX = w; var mnY = h; var mxX = 0; var mxY = 0; var px2 = 0
-            while (hd < tl) { val idx = q[hd++]; val x = idx % w; val y = idx / w; mnX = min(mnX, x); mxX = max(mxX, x); mnY = min(mnY, y); mxY = max(mxY, y); px2++
-                for (n in intArrayOf(idx - 1, idx + 1, idx - w, idx + w)) { if (n in e.indices && !vis[n] && e[n]) { vis[n] = true; q[tl++] = n } } }
-            val cw = mxX - mnX + 1; val ch = mxY - mnY + 1; if (px2 < 20 || cw < 8 || ch < 8 || cw > w * 0.9f || ch > h * 0.9f) continue
-            val ex = (cw * 0.15f).roundToInt().coerceAtLeast(4); val ey = (ch * 0.15f).roundToInt().coerceAtLeast(4)
-            dets += Det(Rect((mnX - ex).coerceAtLeast(0), (mnY - ey).coerceAtLeast(0), (mxX + ex + 1).coerceAtMost(w), (mxY + ey + 1).coerceAtMost(h)), px2.toFloat()) }
-        return mergeDets(dets)
+    private fun validateModelContract(encoder: OrtSession, decoder: OrtSession) {
+        require("pixel_values" in encoder.inputNames) { "Unsupported Manga-OCR encoder input." }
+        require("input_ids" in decoder.inputNames && "encoder_hidden_states" in decoder.inputNames) {
+            "Unsupported Manga-OCR decoder inputs."
+        }
     }
 
-    private fun mergeDets(inp: List<Det>): List<Det> {
-        val r = mutableListOf<Det>(); for (c in inp.sortedByDescending { it.score }) {
-            val ov = r.indexOfFirst { o -> val i = Rect(); i.setIntersect(c.rect, o.rect) && i.width() * i.height() > min(c.rect.width() * c.rect.height(), o.rect.width() * o.rect.height()) * 0.65f }
-            if (ov < 0) r += c }
-        return r
+    private fun recognize(
+        environment: OrtEnvironment,
+        encoder: OrtSession,
+        decoder: OrtSession,
+        bitmap: Bitmap,
+        vocabulary: List<String>,
+    ): Reading {
+        val resized = Bitmap.createScaledBitmap(bitmap, 224, 224, true)
+        try {
+            val pixels = rgbImageTensor(resized)
+            OnnxTensor.createTensor(
+                environment,
+                FloatBuffer.wrap(pixels),
+                longArrayOf(1, 3, 224, 224),
+            ).use { imageTensor ->
+                encoder.run(mapOf("pixel_values" to imageTensor)).use { encoderResult ->
+                    val hidden = encoderResult.get("last_hidden_state").orElse(encoderResult[0]) as OnnxTensor
+                    val generated = mutableListOf(START_TOKEN)
+                    var probabilitySum = 0f
+                    var probabilityCount = 0
+                    repeat(MAX_TOKENS) {
+                        val ids = generated.toLongArray()
+                        OnnxTensor.createTensor(
+                            environment,
+                            LongBuffer.wrap(ids),
+                            longArrayOf(1, ids.size.toLong()),
+                        ).use { idTensor ->
+                            decoder.run(
+                                mapOf(
+                                    "input_ids" to idTensor,
+                                    "encoder_hidden_states" to hidden,
+                                ),
+                            ).use { decoderResult ->
+                                @Suppress("UNCHECKED_CAST")
+                                val logits = decoderResult.get("logits").orElse(decoderResult[0]).value
+                                    as Array<Array<FloatArray>>
+                                val last = logits[0].last()
+                                val best = bestAllowedToken(last, generated)
+                                if (best.toLong() == END_TOKEN) return Reading(
+                                    decode(generated.drop(1), vocabulary),
+                                    if (probabilityCount == 0) 0f else probabilitySum / probabilityCount,
+                                )
+                                generated += best.toLong()
+                                probabilitySum += tokenProbability(last, best)
+                                probabilityCount++
+                            }
+                        }
+                    }
+                    return Reading(
+                        decode(generated.drop(1), vocabulary),
+                        if (probabilityCount == 0) 0f else probabilitySum / probabilityCount,
+                    )
+                }
+            }
+        } finally {
+            if (resized !== bitmap) resized.recycle()
+        }
     }
 
-    private fun bitmapTensor(bmp: Bitmap, mean: FloatArray, std: FloatArray): FloatArray {
-        val px = IntArray(bmp.width * bmp.height); bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height); val pl = px.size
-        val out = FloatArray(pl * 3); px.forEachIndexed { idx, c -> val ch = intArrayOf(c and 255, c shr 8 and 255, c shr 16 and 255); for (i in 0..2) out[i * pl + idx] = (ch[i] / 255f - mean[i]) / std[i] }; return out
+    private fun bestAllowedToken(logits: FloatArray, generated: List<Long>): Int {
+        var best = 0
+        for (candidate in logits.indices) {
+            if (candidate == 0 || repeatsTrigram(generated, candidate.toLong())) continue
+            if (best == 0 || logits[candidate] > logits[best]) best = candidate
+        }
+        return best
+    }
+
+    private fun repeatsTrigram(generated: List<Long>, candidate: Long): Boolean {
+        if (generated.size < 4) return false
+        val first = generated[generated.lastIndex - 1]
+        val second = generated.last()
+        for (index in 0 until generated.size - 2) {
+            if (generated[index] == first && generated[index + 1] == second &&
+                generated[index + 2] == candidate
+            ) return true
+        }
+        return false
+    }
+
+    private fun tokenProbability(logits: FloatArray, selected: Int): Float {
+        val maximum = logits.maxOrNull() ?: return 0f
+        var denominator = 0.0
+        logits.forEach { denominator += exp((it - maximum).toDouble()) }
+        return (exp((logits[selected] - maximum).toDouble()) / denominator.coerceAtLeast(1e-12)).toFloat()
+    }
+
+    private fun decode(ids: List<Long>, vocabulary: List<String>): String {
+        val raw = buildString {
+            ids.forEach { id ->
+                val token = vocabulary.getOrNull(id.toInt()) ?: return@forEach
+                if (token.startsWith("[") && token.endsWith("]")) return@forEach
+                append(token.removePrefix("##"))
+            }
+        }
+        return Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
+    }
+
+    private fun rgbImageTensor(bitmap: Bitmap): FloatArray {
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        val plane = pixels.size
+        return FloatArray(plane * 3).also { output ->
+            pixels.forEachIndexed { index, color ->
+                output[index] = ((color ushr 16 and 255) / 255f - .5f) / .5f
+                output[plane + index] = ((color ushr 8 and 255) / 255f - .5f) / .5f
+                output[plane * 2 + index] = ((color and 255) / 255f - .5f) / .5f
+            }
+        }
     }
 }

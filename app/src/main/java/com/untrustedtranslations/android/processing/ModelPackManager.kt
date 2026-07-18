@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -52,7 +53,9 @@ object ModelPackManager {
         "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master"
     private const val BABERU_BASE = "https://huggingface.co/genshiai-daichi/baberu-ocr/resolve/main"
     private const val MANGA_OCR_BASE =
-        "https://huggingface.co/l0wgear/manga-ocr-2025-onnx/resolve/main"
+        "https://huggingface.co/l0wgear/manga-ocr-2025-onnx/resolve/e8b27bbd3f424fe3877e0bda704d6a920e4f0a33"
+    private const val COMIC_DETECTOR_BASE =
+        "https://huggingface.co/ogkalu/comic-text-and-bubble-detector/resolve/16e8a622f91fabc6b5b65c96d32d1183f8843546"
     private const val HF_BASE =
         "https://huggingface.co/monkt/paddleocr-onnx/resolve/main"
     private const val NLLB_BASE =
@@ -117,7 +120,7 @@ object ModelPackManager {
             ModelPackId.MANGA_OCR_JAPANESE,
             "Manga-OCR Japanese",
             "Vision-transformer (DEiT encoder + BERT decoder) trained on manga. Reads cropped text regions like Gemini - understands the image, not just OCR glyphs. Japanese only.",
-            140, 4, "Apache-2.0. Uses DEiT-tiny encoder + BERT decoder. May be slow on older devices.",
+            151, 4, "Apache-2.0 Manga-OCR plus Apache-2.0 comic dialogue detector. May be slow on older devices.",
         ),
         ModelPackInfo(
             ModelPackId.NLLB_TRANSLATION,
@@ -158,7 +161,20 @@ object ModelPackManager {
                 coroutineContext.ensureActive()
                 val target = File(destination, definition.name)
                 val partial = File(destination, definition.name + ".part")
-                partial.delete()
+                val targetIsValid = target.isFile && definition.sha256?.let { expected ->
+                    sha256(target).equals(expected, ignoreCase = true)
+                } != false
+                if (targetIsValid) {
+                    onProgress(
+                        ModelPackProgress(
+                            id,
+                            definition.name,
+                            (index + 1L) * 1_000_000L,
+                            definitions.size.toLong() * 1_000_000L,
+                        ),
+                    )
+                    return@forEachIndexed
+                }
                 downloadFile(definition, partial) { downloaded, total ->
                     val completedWeight = index.toLong() * 1_000_000L
                     val currentWeight = if (total > 0L) downloaded * 1_000_000L / total else 0L
@@ -173,16 +189,17 @@ object ModelPackManager {
                 }
                 definition.sha256?.let { expected ->
                     val actual = sha256(partial)
-                    check(actual.equals(expected, ignoreCase = true)) {
-                        "Security check failed for ${definition.name}. Expected $expected but received $actual."
+                    if (!actual.equals(expected, ignoreCase = true)) {
+                        partial.delete()
+                        error("Security check failed for ${definition.name}. Expected $expected but received $actual.")
                     }
                 }
                 if (target.exists()) target.delete()
                 check(partial.renameTo(target)) { "Could not finish ${definition.name}." }
             }
-            File(destination, ".complete").writeText("version=1\n")
+            File(destination, ".complete").writeText("version=3\n")
         } catch (error: Throwable) {
-            destination.listFiles()?.filter { it.name.endsWith(".part") }?.forEach(File::delete)
+            // Keep valid partial downloads so a cancelled multi-gigabyte pack can resume.
             throw error
         }
     }
@@ -199,20 +216,25 @@ object ModelPackManager {
         partial: File,
         onProgress: (Long, Long) -> Unit,
     ) {
+        val resumeAt = partial.takeIf { it.isFile }?.length() ?: 0L
         val connection = URL(definition.url).openConnection() as HttpURLConnection
         connection.instanceFollowRedirects = true
         connection.connectTimeout = 20_000
         connection.readTimeout = 45_000
         connection.setRequestProperty("User-Agent", "Untrusted-Translations-Android")
+        if (resumeAt > 0L) connection.setRequestProperty("Range", "bytes=$resumeAt-")
         connection.connect()
+        val append = resumeAt > 0L && connection.responseCode == HttpURLConnection.HTTP_PARTIAL
         check(connection.responseCode in 200..299) {
             "Download failed (${connection.responseCode}) for ${definition.name}."
         }
-        val total = connection.contentLengthLong
+        val downloadedBefore = if (append) resumeAt else 0L
+        val total = connection.contentLengthLong.takeIf { it > 0L }?.plus(downloadedBefore) ?: -1L
         connection.inputStream.use { input ->
-            partial.outputStream().buffered().use { output ->
+            FileOutputStream(partial, append).buffered().use { output ->
                 val buffer = ByteArray(128 * 1024)
-                var downloaded = 0L
+                var downloaded = downloadedBefore
+                onProgress(downloaded, total)
                 while (true) {
                     val count = input.read(buffer)
                     if (count < 0) break
@@ -289,11 +311,25 @@ object ModelPackManager {
             PackFile("tokenizer_config.json", "$BABERU_BASE/tokenizer/tokenizer_config.json"),
         )
         ModelPackId.MANGA_OCR_JAPANESE -> listOf(
-            PackFile("encoder_model.onnx", "$MANGA_OCR_BASE/encoder_model.onnx"),
-            PackFile("decoder_model.onnx", "$MANGA_OCR_BASE/decoder_model.onnx"),
-            PackFile("config.json", "$MANGA_OCR_BASE/config.json"),
-            PackFile("tokenizer.json", "$MANGA_OCR_BASE/tokenizer.json"),
-            PackFile("preprocessor_config.json", "$MANGA_OCR_BASE/preprocessor_config.json"),
+            PackFile(
+                "comic_dialogue_detector.onnx",
+                "$COMIC_DETECTOR_BASE/detector-v4-s_int8.onnx",
+                "5fe9e4f576e49d4e7e8b0e029d6d3cdc252abd4694113e1cae120e62c931ea79",
+            ),
+            PackFile(
+                "encoder_model.onnx",
+                "$MANGA_OCR_BASE/encoder_model.onnx",
+                "f87668ae0f62d6f032dac6b213e8c0fea84cd15895ac8cab624cc9a2f49d4a27",
+            ),
+            PackFile(
+                "decoder_model.onnx",
+                "$MANGA_OCR_BASE/decoder_model.onnx",
+                "6b1fb216d542c4b2a4fa5b9d7ae3522081eb85fb959d2cecd28055af956a8a5e",
+            ),
+            PackFile("config.json", "$MANGA_OCR_BASE/config.json", "cb53957d90b8469961b3a64f9b2ebe472d803bf1308e3505b51916aa4341c547"),
+            PackFile("generation_config.json", "$MANGA_OCR_BASE/generation_config.json", "394166c379c675a6b044ee391bfdf7acbb58b7de68541e66e50607cf56576979"),
+            PackFile("preprocessor_config.json", "$MANGA_OCR_BASE/preprocessor_config.json", "445c77049d082004aa07593344d5e1f521f1198228bf586196f70ce7ae021414"),
+            PackFile("vocab.txt", "$MANGA_OCR_BASE/vocab.txt", "344fbb6b8bf18c57839e924e2c9365434697e0227fac00b88bb4899b78aa594d"),
         )
         ModelPackId.NLLB_TRANSLATION -> listOf(
             PackFile("NLLB_cache_initializer.onnx", "$NLLB_BASE/NLLB_cache_initializer.onnx"),

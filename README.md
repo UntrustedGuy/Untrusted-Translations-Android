@@ -36,11 +36,13 @@ The original import is never edited in place. Images export as PNG, PDF as PDF, 
 
 ## Install
 
-The current build is **0.6.0 Beta 1**. Most physical Android phones need the **ARM64** APK; the x86_64 build is mainly for emulators.
+The current build is **0.7.0 Beta 1**. Most physical Android phones need the **ARM64** APK; the x86_64 build is mainly for emulators.
 
 If you already have the app installed, update it directly. Do not uninstall first unless you also want to remove your projects, settings, and downloaded models.
 
 Models are not hidden inside the APK. Optional OCR and translation packs are downloaded from their credited upstream projects only when you choose them.
+
+At launch, the app checks a small repository manifest for a newer release, a replacement Gemini model name, and corrected model download links. Every remotely changed model file must use an approved HTTPS host and include its expected SHA-256 hash. The app shows an **Update available** card for newer APKs; Android still asks before installing them.
 
 ## A normal translation session
 
@@ -81,7 +83,7 @@ One recognizer is active at a time. Installing three models does not make the ap
 
 - **Local Qwen3** — fully on-device contextual translation in Low (about 485 MB), Mid (about 1.28 GB), and High (about 2.50 GB) sizes.
 - **Google ML Kit** — lightweight offline translation after its language pack is available.
-- **NLLB-200** — about 950 MB, ARM64 only, and intended for stronger offline multilingual translation. The model is **CC BY-NC 4.0 and non-commercial**.
+- **NLLB-200 (legacy)** — about 950 MB and ARM64 only. It is a general-domain research model, not manga-tuned, and its short-dialogue translations can be poor. The model is **CC BY-NC 4.0 and non-commercial**.
 - **Gemini** — official API access using the user's own key/free quota.
 - **Google Translate (unofficial)** — experimental no-key endpoint that may be rate-limited or disappear.
 - **OpenAI, Claude, or a custom OpenAI-compatible endpoint** — optional bring-your-own-key services. Provider billing and terms apply.
@@ -96,7 +98,7 @@ A ChatGPT or Claude website subscription cannot be reused as API credit. The app
 | Baberu OCR | 121 MB | 3 GB+ |
 | Manga-OCR | 140 MB | 4 GB+ |
 | Qwen3 translation Low | 485 MB | 3 GB+ |
-| NLLB translation | 950 MB | 6 GB+ |
+| NLLB translation (legacy) | 950 MB | 6 GB+ |
 | Qwen3 translation Mid | 1.28 GB | 5 GB+ |
 | Qwen2-VL Vision High | 1.70 GB | 6 GB+ |
 | Qwen3 translation High | 2.50 GB | 7 GB+ |

@@ -16,7 +16,7 @@ enum class OcrProvider(val label: String) {
 enum class TranslationProvider(val label: String, val paid: Boolean = false) {
     GEMINI_FREE("Gemini Free (online)"),
     ML_KIT("Google ML Kit (offline)"),
-    NLLB("NLLB high quality (download)"),
+    NLLB("NLLB offline (legacy / download)"),
     LOCAL_AI("Local AI LLM (download)"),
     OPENAI("OpenAI API (paid)", paid = true),
     GOOGLE_UNOFFICIAL("Google Translate (unofficial / experimental)"),

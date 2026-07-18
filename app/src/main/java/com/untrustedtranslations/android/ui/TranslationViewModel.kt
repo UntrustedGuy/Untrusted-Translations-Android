@@ -1,6 +1,7 @@
 package com.untrustedtranslations.android.ui
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +57,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     var compatibleModelDraft by mutableStateOf(""); private set
     var showAiSettingsDialog by mutableStateOf(false); private set
     var modelPackProgress by mutableStateOf<ModelPackProgress?>(null); private set
+    var availableUpdate by mutableStateOf<AppUpdateInfo?>(null); private set
+    var checkingForUpdates by mutableStateOf(false); private set
     private var packRevision by mutableStateOf(0)
     val hasGeminiApiKey get() = geminiApiKeyDraft.isNotBlank()
 
@@ -81,6 +84,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     init {
         loadProviderDrafts()
         refreshProjects()
+        checkForUpdates()
     }
 
     fun selectSourceScript(value: SourceScript) { sourceScript = value; sourceLanguageTag = value.languageTag }
@@ -88,6 +92,27 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun setTargetLanguage(value: String) { targetLanguageTag = value }
     fun dismissError() { errorMessage = null }
     fun dismissNotice() { noticeMessage = null }
+
+    fun checkForUpdates(showResult: Boolean = false) = viewModelScope.launch {
+        if (checkingForUpdates) return@launch
+        checkingForUpdates = true
+        val refreshed = RemoteMaintenance.refresh(getApplication())
+        availableUpdate = RemoteMaintenance.availableAppUpdate(getApplication())
+        if (showResult) {
+            noticeMessage = when {
+                availableUpdate != null -> "Version ${availableUpdate?.version} is available."
+                refreshed -> "Gemini and model download information is current."
+                else -> "Could not check right now. The last verified settings will still be used."
+            }
+        }
+        checkingForUpdates = false
+    }
+
+    fun openAvailableUpdate() {
+        val url = availableUpdate?.releaseUrl ?: return
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        getApplication<Application>().startActivity(intent)
+    }
 
     private fun loadProviderDrafts() {
         SecureAiSettings.load(getApplication()).let {
@@ -353,19 +378,32 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 OcrProvider.COMIC_AI_VISION -> primaryDetected
             }
             val manualBlocks = page.blocks.filter { it.eraseBounds == null }
+            if (ocrProvider == OcrProvider.COMIC_AI_VISION) {
+                VisionLlmRuntime.release()
+                perf.lap("Unload vision")
+            }
             perf.lap("Translate")
             val translated = if (
                 (ocrProvider == OcrProvider.GEMINI_FREE &&
                     translationProvider == TranslationProvider.GEMINI_FREE) ||
                 (ocrProvider == OcrProvider.ML_KIT &&
                     translationProvider == TranslationProvider.ML_KIT)
-            ) detected else detected.map { block ->
-                val result = runCatching { translateWithSelectedProvider(block.originalText) }
-                    .getOrElse { error ->
+            ) detected else {
+                val priorDialogue = mutableListOf<Pair<String, String>>()
+                detected.map { block ->
+                    val attempt = runCatching {
+                        translateWithSelectedProvider(block.originalText, priorDialogue)
+                    }
+                    val result = attempt.getOrElse { error ->
                         if (errorMessage == null) errorMessage = "Translation failed: ${error.message}"
                         block.originalText
                     }
-                block.withAutomaticTranslationLayout(result)
+                    if (attempt.isSuccess && result.isNotBlank()) {
+                        priorDialogue += block.originalText to result
+                        if (priorDialogue.size > 8) priorDialogue.removeAt(0)
+                    }
+                    block.withAutomaticTranslationLayout(result)
+                }
             }
             recordState()
             replaceCurrentPage(
@@ -555,10 +593,13 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    private suspend fun translateWithSelectedProvider(text: String): String =
+    private suspend fun translateWithSelectedProvider(
+        text: String,
+        priorDialogue: List<Pair<String, String>> = emptyList(),
+    ): String =
         when (translationProvider) {
             TranslationProvider.GEMINI_FREE -> GeminiPageEngine.translateText(
-                text, sourceLanguageTag, targetLanguageTag, geminiApiKeyDraft,
+                getApplication(), text, sourceLanguageTag, targetLanguageTag, geminiApiKeyDraft,
             )
             TranslationProvider.ML_KIT -> OcrTranslationEngine.translateText(
                 text, sourceLanguageTag, targetLanguageTag,
@@ -568,6 +609,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             )
             TranslationProvider.LOCAL_AI -> LocalLlmTranslationEngine.translate(
                 getApplication(), localTranslationPack, text, sourceLanguageTag, targetLanguageTag,
+                priorDialogue,
             )
             TranslationProvider.GOOGLE_UNOFFICIAL -> RemoteTranslationEngines.unofficialGoogle(
                 text, sourceLanguageTag, targetLanguageTag,
@@ -676,6 +718,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         resetHistory()
         screen = AppScreen.IMPORT
         refreshProjects()
+        checkForUpdates()
     }
 
     private fun editBlock(transform: TextBlock.() -> TextBlock) {

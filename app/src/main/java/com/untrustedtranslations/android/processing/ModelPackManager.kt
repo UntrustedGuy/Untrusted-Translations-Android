@@ -143,8 +143,8 @@ object ModelPackManager {
         ),
         ModelPackInfo(
             ModelPackId.NLLB_TRANSLATION,
-            "NLLB high-quality offline translation",
-            "RTranslator's optimized NLLB-200 model. Fully offline after download; ARM64 devices only.",
+            "NLLB offline translation - legacy",
+            "General-domain NLLB-200 translation from RTranslator. Offline and ARM64 only; manga dialogue quality can be weak.",
             950, 6, "ARM64 only. RTranslator code is Apache-2.0; NLLB model is non-commercial use only.",
         ),        ModelPackInfo(
             ModelPackId.LOCAL_LLM_LOW,
@@ -197,7 +197,11 @@ object ModelPackManager {
         destination.mkdirs()
         File(destination, ".complete").delete()
         try {
-            val definitions = files(id)
+            val definitions = files(id).map { definition ->
+                RemoteMaintenance.modelFileOverride(context, id, definition.name)?.let { override ->
+                    definition.copy(url = override.url, sha256 = override.sha256)
+                } ?: definition
+            }
             definitions.forEachIndexed { index, definition ->
                 coroutineContext.ensureActive()
                 val target = File(destination, definition.name)

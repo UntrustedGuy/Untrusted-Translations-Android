@@ -21,10 +21,6 @@ import java.util.Locale
 import java.util.UUID
 
 object GeminiPageEngine {
-    private const val MODEL = "gemini-3.5-flash"
-    private const val ENDPOINT =
-        "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
-
     suspend fun process(
         context: Context,
         page: ComicPage,
@@ -39,7 +35,7 @@ object GeminiPageEngine {
         val path = requireNotNull(page.originalSource.path)
         val bitmap = requireNotNull(BitmapFactory.decodeFile(path)) { "Unable to inspect this page." }
         try {
-            val resultText = request(apiKey, pageRequest(compressedPage(bitmap), sourceTag, targetTag))
+            val resultText = request(context, apiKey, pageRequest(compressedPage(bitmap), sourceTag, targetTag))
             val items = JSONArray(resultText)
             buildList {
                 for (index in 0 until items.length()) {
@@ -105,6 +101,7 @@ object GeminiPageEngine {
     }
 
     suspend fun translateText(
+        context: Context,
         text: String,
         sourceTag: String,
         targetTag: String,
@@ -119,7 +116,7 @@ object GeminiPageEngine {
 
             $text
         """.trimIndent()
-        request(apiKey, simpleTextRequest(prompt)).trim()
+        request(context, apiKey, simpleTextRequest(prompt)).trim()
     }
 
     private fun pageRequest(image: ByteArray, sourceTag: String, targetTag: String): JSONObject {
@@ -177,8 +174,10 @@ object GeminiPageEngine {
             .put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
         .put("generationConfig", JSONObject().put("temperature", 0.2).put("maxOutputTokens", 2048))
 
-    private fun request(apiKey: String, payload: JSONObject): String {
-        val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
+    private fun request(context: Context, apiKey: String, payload: JSONObject): String {
+        val model = RemoteMaintenance.geminiModel(context)
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
+        val connection = URL(endpoint).openConnection() as HttpURLConnection
         return try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000

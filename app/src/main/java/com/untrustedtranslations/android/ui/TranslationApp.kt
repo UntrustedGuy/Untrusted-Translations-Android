@@ -194,7 +194,7 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("[LOW] ML Kit", color = AppColors.Muted, style = MaterialTheme.typography.labelSmall)
                     Text("[MID] Google / Local AI", color = AppColors.Muted, style = MaterialTheme.typography.labelSmall)
-                    Text("[HIGH] Gemini / NLLB / Paid API", color = AppColors.Violet, style = MaterialTheme.typography.labelSmall)
+                    Text("[HIGH] Local AI High / Gemini / APIs", color = AppColors.Violet, style = MaterialTheme.typography.labelSmall)
                 }
                 Selector(
                     label = "Primary translator",
@@ -507,6 +507,22 @@ private fun ImportScreen(vm: TranslationViewModel) {
             color = AppColors.Muted,
             style = MaterialTheme.typography.bodyLarge,
         )
+        vm.availableUpdate?.let { update ->
+            Card(colors = CardDefaults.cardColors(containerColor = AppColors.SurfaceRaised)) {
+                Column(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Update available: ${update.version}", fontWeight = FontWeight.Bold)
+                    Text(
+                        "Open the official GitHub release to download it. Android will ask before installing.",
+                        color = AppColors.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Button(onClick = vm::openAvailableUpdate) { Text("Open download page") }
+                }
+            }
+        }
         OutlinedButton(
             onClick = vm::openAiSettings,
             modifier = Modifier.fillMaxWidth(),
@@ -556,6 +572,19 @@ private fun ImportScreen(vm: TranslationViewModel) {
             color = AppColors.Muted,
             style = MaterialTheme.typography.bodySmall,
         )
+        OutlinedButton(
+            onClick = { vm.checkForUpdates(showResult = true) },
+            enabled = !vm.checkingForUpdates,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (vm.checkingForUpdates) {
+                CircularProgressIndicator(Modifier.size(18.dp))
+            } else {
+                Icon(Icons.Default.Refresh, null)
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(if (vm.checkingForUpdates) "Checking..." else "Check updates and model links")
+        }
         if (vm.recentProjects.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Text("YOUR PROJECTS", color = AppColors.Cyan, style = MaterialTheme.typography.labelLarge)

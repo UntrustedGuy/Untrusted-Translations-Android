@@ -23,6 +23,7 @@ object LocalLlmTranslationEngine {
         text: String,
         sourceTag: String,
         targetTag: String,
+        priorDialogue: List<Pair<String, String>> = emptyList(),
     ): String = mutex.withLock {
         require(pack in localLlmPacks) { "Selected pack is not a local translation model." }
         if (text.isBlank() || sourceTag == targetTag) return@withLock text
@@ -34,7 +35,17 @@ object LocalLlmTranslationEngine {
             appendLine("Translate this manga dialogue from $source to $target.")
             appendLine("Preserve character voice, emotion, names, honorifics, and implied context.")
             appendLine("Return only the translated dialogue. Do not explain or add quotation marks.")
-            appendLine("Dialogue: $text")
+            if (priorDialogue.isNotEmpty()) {
+                appendLine("Earlier dialogue from this page, for tone and name consistency:")
+                priorDialogue.takeLast(6).forEachIndexed { index, (previousSource, previousTarget) ->
+                    val cleanSource = previousSource.replace(Regex("\\s+"), " ").trim().take(280)
+                    val cleanTarget = previousTarget.replace(Regex("\\s+"), " ").trim().take(280)
+                    appendLine("${index + 1}. $source: $cleanSource")
+                    appendLine("   $target: $cleanTarget")
+                }
+                appendLine("Keep the new translation consistent with that context.")
+            }
+            appendLine("New dialogue: $text")
             append("/no_think")
         }
         val raw = engine.sendUserPrompt(prompt, predictLength = 256).toList().joinToString("")

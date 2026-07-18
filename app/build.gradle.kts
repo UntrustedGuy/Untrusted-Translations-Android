@@ -11,10 +11,13 @@ android {
         applicationId = "com.untrustedtranslations.android"
         minSdk = 23
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.6.0-beta.1"
+        versionCode = 15
+        versionName = "0.7.0-beta.1"
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     splits {
         abi {
             isEnable = true

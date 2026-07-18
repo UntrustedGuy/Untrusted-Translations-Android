@@ -5,12 +5,12 @@ import android.net.Uri
 enum class ImportFormat { IMAGE, PDF, CBZ, ZIP, FOLDER }
 
 enum class OcrProvider(val label: String) {
-    GEMINI_FREE("Gemini Free (online)"),
-    ML_KIT("Google ML Kit (offline)"),
-    RAPID_OCR("RapidOCR pack (download)"),
-    RAPID_OCR_V5("RapidOCR PP-OCRv5 (download / experimental)"),
-    MANGA_OCR("Comic AI (download / dialogue-only)"),
-    COMIC_AI_VISION("Comic AI Vision (large download / local VLM)"),
+    GEMINI_FREE("Gemini Free (online / dialogue-only)"),
+    ML_KIT("Google ML Kit (offline / dialogue-only)"),
+    RAPID_OCR("RapidOCR (download / dialogue-only)"),
+    RAPID_OCR_V5("PP-OCRv5 (download / dialogue-only)"),
+    MANGA_OCR("Manga-OCR (Japanese / dialogue-only)"),
+    COMIC_AI_VISION("Qwen2-VL Vision (large / dialogue-only)"),
 }
 
 enum class TranslationProvider(val label: String, val paid: Boolean = false) {

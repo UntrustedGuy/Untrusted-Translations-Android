@@ -13,6 +13,7 @@ import java.security.MessageDigest
 import kotlin.coroutines.coroutineContext
 
 enum class ModelPackId {
+    COMIC_DIALOGUE_DETECTOR,
     RAPID_OCR_JAPANESE,
     RAPID_OCR_KOREAN,
     RAPID_OCR_CHINESE,
@@ -75,6 +76,12 @@ object ModelPackManager {
 
     val packs = listOf(
         ModelPackInfo(
+            ModelPackId.COMIC_DIALOGUE_DETECTOR,
+            "Comic dialogue detector",
+            "Shared speech-bubble text detector used by every OCR recognizer. Excludes free text and sound effects.",
+            12, 2, "Apache-2.0 ogkalu comic text and bubble detector.",
+        ),
+        ModelPackInfo(
             ModelPackId.RAPID_OCR_JAPANESE,
             "RapidOCR Japanese",
             "PaddleOCR/RapidOCR models tuned for Japanese text, including vertical manga dialogue.",
@@ -131,8 +138,8 @@ object ModelPackManager {
         ModelPackInfo(
             ModelPackId.MANGA_OCR_JAPANESE,
             "Manga-OCR Japanese",
-            "Vision-transformer (DEiT encoder + BERT decoder) trained on manga. Reads cropped text regions like Gemini - understands the image, not just OCR glyphs. Japanese only.",
-            151, 4, "Apache-2.0 Manga-OCR plus Apache-2.0 comic dialogue detector. May be slow on older devices.",
+            "Japanese Manga-OCR recognizer. Uses the separately downloaded shared comic dialogue detector.",
+            140, 4, "Apache-2.0 Manga-OCR. May be slow on older devices.",
         ),
         ModelPackInfo(
             ModelPackId.NLLB_TRANSLATION,
@@ -159,7 +166,7 @@ object ModelPackManager {
         ),        ModelPackInfo(
             ModelPackId.VLM_OCR_HIGH,
             "Comic AI Vision - High",
-            "Qwen2-VL 2B reads each detected speech bubble visually, with RapidOCR fallback if a crop fails.",
+            "Qwen2-VL 2B is the sole recognizer for Comic AI Vision and reads crops supplied by the shared dialogue detector.",
             1696, 6, "Apache-2.0 Qwen2-VL model and official ggml-org GGUF projector. Fully offline.",
         ),
     )
@@ -295,6 +302,13 @@ object ModelPackManager {
     }
 
     private fun files(id: ModelPackId): List<PackFile> = when (id) {
+        ModelPackId.COMIC_DIALOGUE_DETECTOR -> listOf(
+            PackFile(
+                "comic_dialogue_detector.onnx",
+                "$COMIC_DETECTOR_BASE/detector-v4-s_int8.onnx",
+                "5fe9e4f576e49d4e7e8b0e029d6d3cdc252abd4694113e1cae120e62c931ea79",
+            ),
+        )
         ModelPackId.RAPID_OCR_JAPANESE -> rapidFiles(
             "japan_PP-OCRv4_rec_mobile.onnx",
             null,
@@ -345,11 +359,6 @@ object ModelPackManager {
             PackFile("tokenizer_config.json", "$BABERU_BASE/tokenizer/tokenizer_config.json"),
         )
         ModelPackId.MANGA_OCR_JAPANESE -> listOf(
-            PackFile(
-                "comic_dialogue_detector.onnx",
-                "$COMIC_DETECTOR_BASE/detector-v4-s_int8.onnx",
-                "5fe9e4f576e49d4e7e8b0e029d6d3cdc252abd4694113e1cae120e62c931ea79",
-            ),
             PackFile(
                 "encoder_model.onnx",
                 "$MANGA_OCR_BASE/encoder_model.onnx",

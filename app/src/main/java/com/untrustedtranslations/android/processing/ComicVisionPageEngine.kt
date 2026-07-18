@@ -20,21 +20,22 @@ internal object ComicVisionPageEngine {
         script: SourceScript,
         detectorPack: ModelPackId,
         visionPack: ModelPackId,
-        fallbackRecognitionPack: ModelPackId,
+        deepScan: Boolean = false,
     ): List<TextBlock> = withContext(Dispatchers.IO) {
         val bitmap = context.contentResolver.openInputStream(page.originalSource)
             ?.use(BitmapFactory::decodeStream)
             ?: error("Cannot open page.")
         try {
             val detector = File(ModelPackManager.directory(context, detectorPack), "comic_dialogue_detector.onnx")
-            val regions = ComicDialogueDetector.detect("comic_vision_dialogue", detector, bitmap)
+            val regions = ComicDialogueDetector.detect(
+                "shared_comic_dialogue_detector", detector, bitmap,
+                minimumScore = if (deepScan) .22f else .35f,
+            )
             val blocks = regions.mapNotNull { region ->
                 val cropRect = paddedCrop(region.rect, bitmap.width, bitmap.height)
                 val crop = Bitmap.createBitmap(bitmap, cropRect.left, cropRect.top, cropRect.width(), cropRect.height())
                 val text = try {
-                    VisionLlmRuntime.recognize(context, visionPack, crop, script).ifBlank {
-                        RapidOcrPageEngine.recognizeComicCrop(context, fallbackRecognitionPack, crop).text
-                    }
+                    VisionLlmRuntime.recognize(context, visionPack, crop, script)
                 } finally {
                     crop.recycle()
                 }.trim()

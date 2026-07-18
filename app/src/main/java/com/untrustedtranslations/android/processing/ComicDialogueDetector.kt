@@ -11,11 +11,15 @@ import java.nio.LongBuffer
 internal object ComicDialogueDetector {
     private const val INPUT_SIZE = 640
     private const val TEXT_BUBBLE_LABEL = 1L
-    private const val MIN_SCORE = .35f
 
     data class Region(val rect: Rect, val confidence: Float)
 
-    fun detect(cacheKey: String, model: File, bitmap: Bitmap): List<Region> {
+    fun detect(
+        cacheKey: String,
+        model: File,
+        bitmap: Bitmap,
+        minimumScore: Float = .35f,
+    ): List<Region> {
         val environment = OnnxSessionCache.environment
         val session = OnnxSessionCache.getOrCreate(cacheKey, model)
         require("images" in session.inputNames && "orig_target_sizes" in session.inputNames) {
@@ -49,7 +53,7 @@ internal object ComicDialogueDetector {
                         val scores = (result.get("scores").orElse(result[2]) as OnnxTensor).value
                             as Array<FloatArray>
                         return labels[0].indices.mapNotNull { index ->
-                            if (labels[0][index] != TEXT_BUBBLE_LABEL || scores[0][index] < MIN_SCORE) {
+                            if (labels[0][index] != TEXT_BUBBLE_LABEL || scores[0][index] < minimumScore) {
                                 return@mapNotNull null
                             }
                             val box = boxes[0][index]

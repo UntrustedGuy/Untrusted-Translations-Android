@@ -29,27 +29,32 @@ internal object MangaOcrPageEngine {
         context: Context,
         page: ComicPage,
         script: SourceScript,
-        pack: ModelPackId,
+        detectorPack: ModelPackId,
+        recognitionPack: ModelPackId,
+        deepScan: Boolean = false,
     ): List<TextBlock> = withContext(Dispatchers.IO) {
         require(script == SourceScript.JAPANESE) { "Manga-OCR supports Japanese text only." }
-        require(ModelPackManager.isInstalled(context, pack)) { "Manga-OCR pack not installed." }
-        val directory = ModelPackManager.directory(context, pack)
+        require(ModelPackManager.isInstalled(context, detectorPack)) { "Comic dialogue detector not installed." }
+        require(ModelPackManager.isInstalled(context, recognitionPack)) { "Manga-OCR pack not installed." }
+        val detectorDirectory = ModelPackManager.directory(context, detectorPack)
+        val directory = ModelPackManager.directory(context, recognitionPack)
         val bitmap = context.contentResolver.openInputStream(page.originalSource)
             ?.use(BitmapFactory::decodeStream)
             ?: error("Cannot open page.")
         try {
             val regions = ComicDialogueDetector.detect(
-                "${pack.name}_comic_dialogue_detector",
-                java.io.File(directory, "comic_dialogue_detector.onnx"),
+                "shared_comic_dialogue_detector",
+                java.io.File(detectorDirectory, "comic_dialogue_detector.onnx"),
                 bitmap,
+                minimumScore = if (deepScan) .22f else .35f,
             )
             val environment = OnnxSessionCache.environment
             val encoder = OnnxSessionCache.getOrCreate(
-                "${pack.name}_encoder",
+                "${recognitionPack.name}_encoder",
                 java.io.File(directory, "encoder_model.onnx"),
             )
             val decoder = OnnxSessionCache.getOrCreate(
-                "${pack.name}_decoder",
+                "${recognitionPack.name}_decoder",
                 java.io.File(directory, "decoder_model.onnx"),
             )
             validateModelContract(encoder, decoder)

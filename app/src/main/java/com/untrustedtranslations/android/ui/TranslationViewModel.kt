@@ -93,6 +93,10 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         SecureAiSettings.load(getApplication()).let {
             ocrProvider = it.ocrProvider
             translationProvider = it.translationProvider
+            runCatching { ModelPackId.valueOf(it.localTranslationPackName) }
+                .getOrNull()
+                ?.takeIf { pack -> pack in LocalLlmTranslationEngine.localLlmPacks }
+                ?.let { pack -> localTranslationPack = pack }
 
             geminiApiKeyDraft = it.geminiApiKey
             openAiApiKeyDraft = it.openAiApiKey
@@ -144,6 +148,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             ocrProvider == OcrProvider.GEMINI_FREE ||
                 translationProvider == TranslationProvider.GEMINI_FREE
         val problem = when {
+            ocrProvider == OcrProvider.MANGA_OCR && sourceScript != SourceScript.JAPANESE ->
+                "Manga-OCR recognizes Japanese only. Choose another primary dialogue recognizer for ${sourceScript.label}."
             usesGemini && geminiApiKeyDraft.isBlank() ->
                 "Paste a Gemini API key, or choose another provider."
             translationProvider == TranslationProvider.OPENAI && openAiApiKeyDraft.isBlank() ->
@@ -179,6 +185,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             AiSettings(
                 ocrProvider = ocrProvider,
                 translationProvider = translationProvider,
+                localTranslationPackName = localTranslationPack.name,
                 geminiApiKey = geminiApiKeyDraft,
                 openAiApiKey = openAiApiKeyDraft,
                 anthropicApiKey = anthropicApiKeyDraft,
@@ -213,6 +220,9 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         if (id == ModelPackId.NLLB_TRANSLATION) NllbTranslationEngine.release()
         if (id in LocalLlmTranslationEngine.localLlmPacks) LocalLlmTranslationEngine.release()
         if (id == ModelPackId.VLM_OCR_HIGH) VisionLlmRuntime.release()
+        if (id == ModelPackId.COMIC_DIALOGUE_DETECTOR) {
+            OnnxSessionCache.release("shared_comic_dialogue_detector")
+        }
         OnnxSessionCache.release(id.name)
         ModelPackManager.delete(getApplication(), id)
         if (id in requiredOcrPacks(ocrProvider)) ocrProvider = OcrProvider.ML_KIT
@@ -221,21 +231,14 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         saveProviderDrafts()
     }
 
-    private fun requiredOcrPacks(provider: OcrProvider): List<ModelPackId> = when (provider) {
-        OcrProvider.RAPID_OCR -> listOf(ModelPackManager.rapidPack(sourceScript))
-        OcrProvider.RAPID_OCR_V5 -> listOf(ModelPackManager.rapidPack(sourceScript, useV5 = true))
-        OcrProvider.MANGA_OCR -> if (sourceScript == SourceScript.JAPANESE) {
-            listOf(ModelPackId.MANGA_OCR_JAPANESE)
-        } else {
-            listOf(ModelPackId.MANGA_OCR_JAPANESE, ModelPackManager.rapidPack(sourceScript))
+    private fun requiredOcrPacks(provider: OcrProvider): List<ModelPackId> =
+        listOf(ModelPackId.COMIC_DIALOGUE_DETECTOR) + when (provider) {
+            OcrProvider.RAPID_OCR -> listOf(ModelPackManager.rapidPack(sourceScript))
+            OcrProvider.RAPID_OCR_V5 -> listOf(ModelPackManager.rapidPack(sourceScript, useV5 = true))
+            OcrProvider.MANGA_OCR -> listOf(ModelPackId.MANGA_OCR_JAPANESE)
+            OcrProvider.COMIC_AI_VISION -> listOf(ModelPackId.VLM_OCR_HIGH)
+            OcrProvider.GEMINI_FREE, OcrProvider.ML_KIT -> emptyList()
         }
-        OcrProvider.COMIC_AI_VISION -> listOf(
-            ModelPackId.MANGA_OCR_JAPANESE,
-            ModelPackId.VLM_OCR_HIGH,
-            ModelPackManager.rapidPack(sourceScript),
-        )
-        OcrProvider.GEMINI_FREE, OcrProvider.ML_KIT -> emptyList()
-    }
 
     private fun requiredTranslationPack(provider: TranslationProvider): ModelPackId? = when (provider) {
         TranslationProvider.NLLB -> ModelPackId.NLLB_TRANSLATION
@@ -281,6 +284,10 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun processCurrentPage(deepScan: Boolean = false) = viewModelScope.launch {
         val page = currentPage ?: return@launch
+        if (ocrProvider == OcrProvider.MANGA_OCR && sourceScript != SourceScript.JAPANESE) {
+            errorMessage = "Manga-OCR recognizes Japanese only. Choose another primary dialogue recognizer."
+            return@launch
+        }
         val ocrPack = ModelPackManager.rapidPack(sourceScript, ocrProvider == OcrProvider.RAPID_OCR_V5)
         requiredOcrPacks(ocrProvider).forEach { pack ->
             if (!isPackInstalled(pack)) {
@@ -305,7 +312,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         perf.start()
         runBusy(message) {
             perf.lap("Detect")
-            val detected = when (ocrProvider) {
+            val primaryDetected = when (ocrProvider) {
                 OcrProvider.GEMINI_FREE -> GeminiPageEngine.process(
                     getApplication(), page, sourceScript, sourceLanguageTag,
                     targetLanguageTag, geminiApiKeyDraft,
@@ -318,27 +325,32 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 OcrProvider.RAPID_OCR_V5 -> RapidOcrPageEngine.process(
                     getApplication(), page, sourceScript, ocrPack,
                 )
-                OcrProvider.MANGA_OCR -> if (sourceScript == SourceScript.JAPANESE) {
-                    MangaOcrPageEngine.process(
-                        getApplication(), page, sourceScript, ModelPackId.MANGA_OCR_JAPANESE,
-                    )
-                } else {
-                    ComicAiPageEngine.process(
-                        getApplication(),
-                        page,
-                        sourceScript,
-                        ModelPackId.MANGA_OCR_JAPANESE,
-                        ModelPackManager.rapidPack(sourceScript),
-                    )
-                }
+                OcrProvider.MANGA_OCR -> MangaOcrPageEngine.process(
+                    getApplication(),
+                    page,
+                    sourceScript,
+                    ModelPackId.COMIC_DIALOGUE_DETECTOR,
+                    ModelPackId.MANGA_OCR_JAPANESE,
+                    deepScan,
+                )
                 OcrProvider.COMIC_AI_VISION -> ComicVisionPageEngine.process(
                     getApplication(),
                     page,
                     sourceScript,
-                    ModelPackId.MANGA_OCR_JAPANESE,
+                    ModelPackId.COMIC_DIALOGUE_DETECTOR,
                     ModelPackId.VLM_OCR_HIGH,
-                    ModelPackManager.rapidPack(sourceScript),
+                    deepScan,
                 )
+            }
+            val detected = when (ocrProvider) {
+                OcrProvider.GEMINI_FREE,
+                OcrProvider.ML_KIT,
+                OcrProvider.RAPID_OCR,
+                OcrProvider.RAPID_OCR_V5 -> DialogueOnlyFilter.keepDialogue(
+                    getApplication(), page, primaryDetected, deepScan,
+                )
+                OcrProvider.MANGA_OCR,
+                OcrProvider.COMIC_AI_VISION -> primaryDetected
             }
             val manualBlocks = page.blocks.filter { it.eraseBounds == null }
             perf.lap("Translate")

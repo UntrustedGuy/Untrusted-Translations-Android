@@ -15,6 +15,7 @@ import javax.crypto.spec.GCMParameterSpec
 data class AiSettings(
     val ocrProvider: OcrProvider = OcrProvider.ML_KIT,
     val translationProvider: TranslationProvider = TranslationProvider.ML_KIT,
+    val localTranslationPackName: String = "",
     val geminiApiKey: String = "",
     val openAiApiKey: String = "",
     val anthropicApiKey: String = "",
@@ -27,6 +28,7 @@ object SecureAiSettings {
     private const val PREFS = "private_ai_settings"
     private const val KEY_OCR = "ocr_provider"
     private const val KEY_TRANSLATION = "translation_provider"
+    private const val KEY_LOCAL_TRANSLATION_PACK = "local_translation_pack"
     private const val KEY_GEMINI = "gemini_key_ciphertext"
     private const val KEY_OPENAI = "openai_key_ciphertext"
     private const val KEY_ANTHROPIC = "anthropic_key_ciphertext"
@@ -58,6 +60,7 @@ object SecureAiSettings {
         return AiSettings(
             ocrProvider = ocr,
             translationProvider = translation,
+            localTranslationPackName = prefs.getString(KEY_LOCAL_TRANSLATION_PACK, "").orEmpty(),
             geminiApiKey = readSecret(prefs, KEY_GEMINI),
             openAiApiKey = readSecret(prefs, KEY_OPENAI),
             anthropicApiKey = readSecret(prefs, KEY_ANTHROPIC),
@@ -71,6 +74,7 @@ object SecureAiSettings {
         val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_OCR, settings.ocrProvider.name)
             .putString(KEY_TRANSLATION, settings.translationProvider.name)
+            .putString(KEY_LOCAL_TRANSLATION_PACK, settings.localTranslationPackName)
             .putString(KEY_COMPATIBLE_BASE, settings.compatibleBaseUrl.trim())
             .putString(KEY_COMPATIBLE_MODEL, settings.compatibleModel.trim())
             .remove("processing_mode")

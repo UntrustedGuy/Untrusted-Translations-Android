@@ -6,18 +6,28 @@ Import an image, PDF, CBZ, ZIP, or image folder; detect dialogue; correct the so
 
 > **Beta notice:** OCR and machine translation can be wrong. Review every page before publishing it, and only translate material you have permission to use.
 
+## Screenshots
+
+| Import and projects | OCR and translation selectors |
+| --- | --- |
+| <img src="docs/screenshots/home.png" width="320" alt="Dark import and projects screen"> | <img src="docs/screenshots/ocr-translation-settings.png" width="320" alt="Primary OCR and translation selectors"> |
+
+| Page placement editor | Text correction and formatting |
+| --- | --- |
+| <img src="docs/screenshots/page-editor.png" width="320" alt="Manga page with move resize and rotate controls"> | <img src="docs/screenshots/text-editor.png" width="320" alt="Source translation and lettering controls"> |
+
 ## Features
 
 - Imports PNG, JPEG, WebP, PDF, CBZ, ZIP, and folders selected through Android's system picker.
 - Sorts archive and folder pages naturally (`2` before `10`).
 - Processes one page at a time; it never forces automatic page changes.
-- Provides a phone-friendly editor with source text and translated text in separate fields.
+- Provides a phone-friendly editor with source text and translated text in separate fields, plus optional font, alignment, color, bold, italic, and vertical-text controls.
 - Lets you tap an applied text block to select it, drag it to move it, resize it from four sides, or switch to the rotation handle.
 - Keeps font and size stable while moving or rotating. Resizing is the action that changes the text size.
 - Supports manually added text with the manga font and an optional background; after adding it, size, position, and rotation are adjusted on the page. Added text is not placed in the translation review list.
 - Includes undo/redo, project autosave, previous-page navigation, **Save page**, **Save & Next**, and **Save & Exit**.
 - Exports a new translated file into `Downloads/Untrusted Translations`; the imported original is never overwritten.
-- Intentionally favors speech-bubble dialogue and excludes sound effects where the selected comic OCR provider can distinguish them.
+- Runs every OCR provider through the shared comic dialogue detector so speech bubbles are kept while sound effects and free art text are intentionally excluded.
 - Stores editable project data privately on the device. Exported files are flattened images/PDF pages, not editable text layers.
 
 ## Source script and source language are different
@@ -32,7 +42,7 @@ For example, a French comic uses **English / Latin** for text detection and **Fr
 ## Typical workflow
 
 1. Choose the detection script, source language, and target language.
-2. Open **OCR & translation** and select providers. Download only the optional packs you want.
+2. Open **OCR & translation**, choose the **Primary dialogue recognizer** and **Primary translator**, then download only the optional packs you want. Downloaded packs are not activated automatically.
 3. Import a supported file or folder.
 4. Review the detected boxes on the page. Use **Deep scan** if a dialogue bubble was missed.
 5. Open **Editor**, correct OCR/translation text, and apply the replacements.
@@ -56,20 +66,20 @@ CBR/RAR is not supported. The app does not edit an archive in place. It writes a
 
 | Provider | Network | Notes |
 | --- | --- | --- |
-| Comic AI | Download once | Recommended dialogue-first pipeline. Uses the comic detector plus Japanese Manga-OCR or the matching RapidOCR recognizer. Designed to avoid free text/SFX. |
-| Comic AI Vision | Download once | High-tier local Qwen2-VL crop reader with the same comic detector and RapidOCR fallback. Large download and higher RAM use. |
-| RapidOCR | Download once | Small script-specific PaddleOCR/RapidOCR ONNX packs. |
-| RapidOCR PP-OCRv5 | Download once | Experimental newer detector/recognizers. |
-| Google ML Kit | Offline after SDK/model availability | Fast baseline for clean print; weaker on stylized bubbles and some vertical layouts. |
-| Gemini Free | Online | Context-aware page OCR using the user's own Gemini API key/free quota. Billing can be left disabled. |
+| Manga-OCR | Download once | Japanese-only recognizer. Uses the separate shared dialogue detector; it is not used by Qwen Vision. |
+| Qwen2-VL Vision | ~1.70 GB download | High-tier local vision recognizer. It is the sole recognizer when selected and does not use Manga-OCR or RapidOCR as a fallback. |
+| RapidOCR | Download once | Small script-specific PaddleOCR/RapidOCR ONNX packs. Only the pack matching the selected source script is active. |
+| RapidOCR PP-OCRv5 | Download once | Experimental newer script-specific recognizer. |
+| Google ML Kit | Offline after SDK/model availability | Fast baseline for clean print; its candidates are filtered by the shared dialogue detector. |
+| Gemini Free | Online | Context-aware page OCR using the user's own Gemini API key/free quota; returned boxes are still checked by the shared detector. |
 
-No OCR can guarantee every stylized bubble. Deep scan broadens the search, while dialogue-only providers deliberately reject likely SFX and non-dialogue art text.
+Every OCR choice uses the separate ~12 MB comic dialogue detector first or as a final gate. The **Primary dialogue recognizer** dropdown selects exactly one recognizer; other downloaded recognizers remain inactive. No OCR can guarantee every stylized bubble. **Deep scan** lowers the dialogue threshold to find missed bubbles but still intentionally rejects likely SFX and free art text.
 
 ## Translation providers
 
 | Provider | Cost/network | Notes |
 | --- | --- | --- |
-| Local AI LLM | Optional 485 MB–2.5 GB download | Qwen3 GGUF models run fully on the phone and retain page-dialogue context. Low, Mid, and High tiers are selectable. |
+| Local AI LLM | Optional 485 MB-2.5 GB download | Qwen3 GGUF models run fully on the phone and retain page-dialogue context. Low, Mid, and High are shown together; tap **Use model** to activate one. |
 | Google ML Kit | Free/offline after language download | Fast and broad language coverage; sentence quality varies. |
 | NLLB | Optional ~950 MB download | Fully local, ARM64, about 6 GB RAM recommended. **Non-commercial model license.** |
 | Gemini Free | Online free quota | Context-aware translation with the user's Gemini API key. Quota and availability are controlled by Google. |
@@ -82,7 +92,9 @@ Signing into ChatGPT or Claude in a browser cannot legally or reliably transfer 
 
 ## Device tiers and downloads
 
-AI models are **not bundled in the APK**. The app recommends a tier from available RAM/CPU architecture, but the user chooses what to download.
+AI models are **not bundled in the APK**. The app recommends a tier from available RAM/CPU architecture, but the user chooses what to download and which downloaded model is active. OCR and translation selections are independent and remembered after restarting the app. Downloading a model never activates it by itself.
+
+The ~2.50 GB Qwen3 4B pack is a **text translation** model, not an OCR model. The large vision OCR pack is Qwen2-VL at ~1.70 GB.
 
 | Tier | Local translation | Suggested memory |
 | --- | --- | --- |

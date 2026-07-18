@@ -152,65 +152,41 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                     Text("[HIGH] Gemini / Vision", color = AppColors.Violet, style = MaterialTheme.typography.labelSmall)
                 }
                 Selector(
-                    label = "Detect text with",
+                    label = "Primary dialogue recognizer",
                     value = vm.ocrProvider.label,
                     options = OcrProvider.entries.map { it.label },
                 ) { label ->
                     vm.chooseOcrProvider(OcrProvider.entries.first { it.label == label })
                 }
+                ProviderNote(
+                    "Active pipeline: Comic dialogue detector → ${vm.ocrProvider.label}. Downloaded recognizers stay inactive unless selected above.",
+                )
+                ModelPackCard(vm, ModelPackId.COMIC_DIALOGUE_DETECTOR)
                 when (vm.ocrProvider) {
                     OcrProvider.RAPID_OCR -> {
-                        Text(
-                            "Download packs for each script you want to detect:",
-                            color = AppColors.Muted,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Text(
-                            "Selected script: ${vm.sourceScript.label}  —  download the matching pack",
-                            color = AppColors.Cyan,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        ModelPackCard(vm, ModelPackId.RAPID_OCR_JAPANESE)
-                        ModelPackCard(vm, ModelPackId.RAPID_OCR_KOREAN)
-                        ModelPackCard(vm, ModelPackId.RAPID_OCR_CHINESE)
-                        ModelPackCard(vm, ModelPackId.RAPID_OCR_LATIN)
-                    }
-                    OcrProvider.MANGA_OCR -> {
-                        ProviderNote(
-                            "Comic-specific AI detects speech-bubble dialogue and excludes free text and sound effects.",
-                        )
-                        ModelPackCard(vm, ModelPackId.MANGA_OCR_JAPANESE)
-                        if (vm.sourceScript != SourceScript.JAPANESE) {
-                            ProviderNote(
-                                "${vm.sourceScript.label} recognition also needs its matching RapidOCR pack.",
-                            )
-                            ModelPackCard(vm, ModelPackManager.rapidPack(vm.sourceScript))
-                        }
-                    }                    OcrProvider.COMIC_AI_VISION -> {
-                        ProviderNote(
-                            "High-quality fully local vision OCR. The comic detector supplies exact boxes; Qwen2-VL reads each bubble, with RapidOCR fallback so a failed vision response does not lose the block.",
-                        )
-                        ProviderNote("Device: ${vm.deviceProfile.summary}")
-                        ModelPackCard(vm, ModelPackId.VLM_OCR_HIGH)
-                        ModelPackCard(vm, ModelPackId.MANGA_OCR_JAPANESE)
+                        ProviderNote("Selected script: ${vm.sourceScript.label}. Only its matching RapidOCR pack is used.")
                         ModelPackCard(vm, ModelPackManager.rapidPack(vm.sourceScript))
                     }
                     OcrProvider.RAPID_OCR_V5 -> {
-                        Text(
-                            "PP-OCRv5 models from HuggingFace — improved detection. Experimental.",
-                            color = AppColors.Muted,
-                            style = MaterialTheme.typography.bodySmall,
+                        ProviderNote("Experimental PP-OCRv5 recognition for ${vm.sourceScript.label}.")
+                        ModelPackCard(vm, ModelPackManager.rapidPack(vm.sourceScript, useV5 = true))
+                    }
+                    OcrProvider.MANGA_OCR -> {
+                        ProviderNote("Japanese-only Manga-OCR. It is not used by Qwen Vision or other recognizers.")
+                        ModelPackCard(vm, ModelPackId.MANGA_OCR_JAPANESE)
+                    }
+                    OcrProvider.COMIC_AI_VISION -> {
+                        ProviderNote(
+                            "Qwen2-VL is the only recognizer in this mode. Manga-OCR and RapidOCR are not required or used.",
                         )
-                        ModelPackCard(vm, ModelPackId.RAPID_OCR_V5_JAPANESE)
-                        ModelPackCard(vm, ModelPackId.RAPID_OCR_V5_KOREAN)
-                        ModelPackCard(vm, ModelPackId.RAPID_OCR_V5_CHINESE)
-                        ModelPackCard(vm, ModelPackId.RAPID_OCR_V5_LATIN)
+                        ProviderNote("Download: about 1.7 GB. Device: ${vm.deviceProfile.summary}")
+                        ModelPackCard(vm, ModelPackId.VLM_OCR_HIGH)
                     }
                     OcrProvider.ML_KIT -> ProviderNote(
-                        "Lightweight and offline. Good for clean print, but weaker on stylized or vertical manga text.",
+                        "ML Kit reads candidates; the shared detector keeps only speech-bubble dialogue.",
                     )
                     OcrProvider.GEMINI_FREE -> ProviderNote(
-                        "Reads the whole page for context and ignores sound effects. Requires a Gemini API key.",
+                        "Gemini reads the page with context; its returned boxes are still checked by the shared dialogue detector. Requires a Gemini API key.",
                     )
                 }
 
@@ -221,7 +197,7 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                     Text("[HIGH] Gemini / NLLB / Paid API", color = AppColors.Violet, style = MaterialTheme.typography.labelSmall)
                 }
                 Selector(
-                    label = "Translate text with",
+                    label = "Primary translator",
                     value = vm.translationProvider.label,
                     options = TranslationProvider.entries.map { it.label },
                 ) { label ->
@@ -229,6 +205,9 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                         TranslationProvider.entries.first { it.label == label },
                     )
                 }
+                ProviderNote(
+                    "Active translator: ${vm.translationProvider.label}. Downloaded translation models stay inactive unless selected.",
+                )
                 when (vm.translationProvider) {
                     TranslationProvider.NLLB -> ModelPackCard(vm, ModelPackId.NLLB_TRANSLATION)
                     TranslationProvider.LOCAL_AI -> {
@@ -236,23 +215,21 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                         ProviderNote(
                             "Models are optional downloads and run fully on this Android device. Higher tiers improve context and sentence quality but need more RAM.",
                         )
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            listOf(
-                                ModelPackId.LOCAL_LLM_LOW to "Low",
-                                ModelPackId.LOCAL_LLM_MID to "Mid",
-                                ModelPackId.LOCAL_LLM_HIGH to "High",
-                            ).forEach { (pack, label) ->
-                                FilterChip(
-                                    selected = vm.localTranslationPack == pack,
-                                    onClick = { vm.chooseLocalTranslationPack(pack) },
-                                    label = { Text(label) },
-                                )
-                            }
+                        ProviderNote(
+                            "Download any number of models, then tap Use model on exactly one. The choice is remembered after restarting the app.",
+                        )
+                        listOf(
+                            ModelPackId.LOCAL_LLM_LOW,
+                            ModelPackId.LOCAL_LLM_MID,
+                            ModelPackId.LOCAL_LLM_HIGH,
+                        ).forEach { pack ->
+                            ModelPackCard(
+                                vm = vm,
+                                id = pack,
+                                active = vm.localTranslationPack == pack,
+                                onUse = { vm.chooseLocalTranslationPack(pack) },
+                            )
                         }
-                        ModelPackCard(vm, vm.localTranslationPack)
                     }
                     TranslationProvider.GOOGLE_UNOFFICIAL -> ProviderNote(
                         "Unofficial / experimental. Free and needs no key or login, but Google can change or block it at any time. No cookies are used.",
@@ -370,7 +347,12 @@ private fun ProviderNote(text: String, warning: Boolean = false) {
 }
 
 @Composable
-private fun ModelPackCard(vm: TranslationViewModel, id: ModelPackId) {
+private fun ModelPackCard(
+    vm: TranslationViewModel,
+    id: ModelPackId,
+    active: Boolean = false,
+    onUse: (() -> Unit)? = null,
+) {
     val info = ModelPackManager.info(id)
     val installed = vm.isPackInstalled(id)
     val progress = vm.modelPackProgress?.takeIf { it.pack == id }
@@ -398,7 +380,14 @@ private fun ModelPackCard(vm: TranslationViewModel, id: ModelPackId) {
                 )
             } else if (installed) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Installed", color = AppColors.Cyan, modifier = Modifier.weight(1f))
+                    Text(
+                        if (active) "Active" else "Installed",
+                        color = if (active) AppColors.Violet else AppColors.Cyan,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (!active && onUse != null) {
+                        TextButton(onUse) { Text("Use model") }
+                    }
                     TextButton({ vm.deletePack(id) }) { Text("Delete pack") }
                 }
             } else {
@@ -814,8 +803,22 @@ private fun EditorScreen(vm: TranslationViewModel) {
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3,
             )
+            Selector("Font", block.style.font.label, FontChoice.entries.map { it.label }) { label ->
+                vm.updateFont(FontChoice.entries.first { it.label == label })
+            }
+            Selector("Alignment", block.style.alignment.label, TextAlignmentChoice.entries.map { it.label }) { label ->
+                vm.updateAlignment(TextAlignmentChoice.entries.first { it.label == label })
+            }
+            Selector("Text color", textColors.getValue(block.style.textColorArgb), textColors.values.toList()) { label ->
+                vm.updateTextColor(textColors.entries.first { it.value == label }.key)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(block.style.bold, { vm.updateBold(!block.style.bold) }, { Text("Bold") })
+                FilterChip(block.style.italic, { vm.updateItalic(!block.style.italic) }, { Text("Italic") })
+                FilterChip(block.style.vertical, { vm.updateVertical(!block.style.vertical) }, { Text("Vertical") })
+            }
             Text(
-                "Apply the text, then set its size, position, and rotation directly on the manga page.",
+                "Automatic manga formatting is the default. These controls are optional; size, position, and rotation remain adjustable on the page.",
                 color = AppColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
             )

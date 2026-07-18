@@ -24,6 +24,10 @@ enum class ModelPackId {
     MANGA_OCR_JAPANESE,
     BABERU_OCR_MULTILINGUAL,
     NLLB_TRANSLATION,
+    LOCAL_LLM_LOW,
+    LOCAL_LLM_MID,
+    LOCAL_LLM_HIGH,
+    VLM_OCR_HIGH,
 }
 
 data class ModelPackInfo(
@@ -60,6 +64,14 @@ object ModelPackManager {
         "https://huggingface.co/monkt/paddleocr-onnx/resolve/main"
     private const val NLLB_BASE =
         "https://github.com/niedev/RTranslator/releases/download/2.0.0"
+    private const val LOCAL_LLM_LOW_BASE =
+        "https://huggingface.co/bartowski/Qwen_Qwen3-0.6B-GGUF/resolve/60b85c0e3d8fe0f6474f406922a26d12aca4550d"
+    private const val LOCAL_LLM_MID_BASE =
+        "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/dcb19155b962dbb6389f4691a982043a8e651022"
+    private const val LOCAL_LLM_HIGH_BASE =
+        "https://huggingface.co/bartowski/Qwen_Qwen3-4B-GGUF/resolve/cb76885dc66d50759b207c5a48c4e78dfa00c638"
+    private const val VLM_OCR_BASE =
+        "https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF/resolve/bb307c036e8a1ed7b663bbd0c35b41c4c9294cfd"
 
     val packs = listOf(
         ModelPackInfo(
@@ -127,6 +139,28 @@ object ModelPackManager {
             "NLLB high-quality offline translation",
             "RTranslator's optimized NLLB-200 model. Fully offline after download; ARM64 devices only.",
             950, 6, "ARM64 only. RTranslator code is Apache-2.0; NLLB model is non-commercial use only.",
+        ),        ModelPackInfo(
+            ModelPackId.LOCAL_LLM_LOW,
+            "Local AI translation - Low",
+            "Qwen3 0.6B Q4. Fastest contextual local translator for lower-memory devices.",
+            485, 3, "Apache-2.0 Qwen3 model; GGUF quantization by bartowski. Fully offline.",
+        ),
+        ModelPackInfo(
+            ModelPackId.LOCAL_LLM_MID,
+            "Local AI translation - Mid",
+            "Qwen3 1.7B Q4. Better tone and sentence formation with page-dialogue context.",
+            1283, 5, "Apache-2.0 Qwen3 model; GGUF quantization by bartowski. Fully offline.",
+        ),
+        ModelPackInfo(
+            ModelPackId.LOCAL_LLM_HIGH,
+            "Local AI translation - High",
+            "Qwen3 4B Q4. Best local translation quality; intended for devices with at least 7 GB RAM.",
+            2498, 7, "Apache-2.0 Qwen3 model; GGUF quantization by bartowski. Fully offline.",
+        ),        ModelPackInfo(
+            ModelPackId.VLM_OCR_HIGH,
+            "Comic AI Vision - High",
+            "Qwen2-VL 2B reads each detected speech bubble visually, with RapidOCR fallback if a crop fails.",
+            1696, 6, "Apache-2.0 Qwen2-VL model and official ggml-org GGUF projector. Fully offline.",
         ),
     )
 
@@ -339,6 +373,39 @@ object ModelPackManager {
             PackFile(
                 "sentencepiece_bpe.model",
                 "https://raw.githubusercontent.com/niedev/RTranslator/e1cd028ac73b072c84773b259e48d841ca8f87d1/app/src/main/assets/sentencepiece_bpe.model",
+            ),
+        )
+        ModelPackId.LOCAL_LLM_LOW -> listOf(
+            PackFile(
+                "model.gguf",
+                "$LOCAL_LLM_LOW_BASE/Qwen_Qwen3-0.6B-Q4_K_M.gguf",
+                "9acfc1e001311f34b4252001b626f2e466d592a42065f66571bff3790d4e1b14",
+            ),
+        )
+        ModelPackId.LOCAL_LLM_MID -> listOf(
+            PackFile(
+                "model.gguf",
+                "$LOCAL_LLM_MID_BASE/Qwen_Qwen3-1.7B-Q4_K_M.gguf",
+                "72c5c3cb38fa32d5256e2fe30d03e7a64c6c79e668ad84057e3bd66e250b24fb",
+            ),
+        )
+        ModelPackId.LOCAL_LLM_HIGH -> listOf(
+            PackFile(
+                "model.gguf",
+                "$LOCAL_LLM_HIGH_BASE/Qwen_Qwen3-4B-Q4_K_M.gguf",
+                "fbe1d5edd4ce802ae3ae7c7e4ab7d09789d697fdac1fc7929f8df4ca3c41bae3",
+            ),
+        )
+        ModelPackId.VLM_OCR_HIGH -> listOf(
+            PackFile(
+                "model.gguf",
+                "$VLM_OCR_BASE/Qwen2-VL-2B-Instruct-Q4_K_M.gguf",
+                "5745685d2e607a82a0696c1118e56a2a1ae0901da450fd9cd4f161c6b62867d7",
+            ),
+            PackFile(
+                "mmproj.gguf",
+                "$VLM_OCR_BASE/mmproj-Qwen2-VL-2B-Instruct-Q8_0.gguf",
+                "a0ad91f00a7a80dcf84d719a61b00ee2e07b71794f4ee2dfa81a254621a8c418",
             ),
         )
     }

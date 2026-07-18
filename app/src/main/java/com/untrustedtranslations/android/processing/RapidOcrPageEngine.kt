@@ -93,6 +93,42 @@ internal object RapidOcrPageEngine {
         BlockGrouping.filterDialogue(BlockGrouping.groupIntoBubbles(blocks, script))
     }
 
+    data class CropReading(val text: String, val confidence: Float)
+
+    /** Recognizes a dialogue crop supplied by the comic-aware detector. */
+    fun recognizeComicCrop(context: Context, pack: ModelPackId, bitmap: Bitmap): CropReading {
+        val directory = ModelPackManager.directory(context, pack)
+        val environment = OnnxSessionCache.environment
+        val recognizer = OnnxSessionCache.getOrCreate(
+            "${pack.name}_rec",
+            java.io.File(directory, "rec.onnx"),
+        )
+        val classifierFile = java.io.File(directory, "cls.onnx")
+        val classifier = classifierFile.takeIf { it.isFile }?.let {
+            OnnxSessionCache.getOrCreate("${pack.name}_cls", it)
+        }
+        val keys = listOf("#") + java.io.File(directory, "keys.txt").readLines() + " "
+        val candidates = mutableListOf(bitmap)
+        if (bitmap.height > bitmap.width * 1.35f) {
+            candidates += rotate(bitmap, 90f)
+            candidates += rotate(bitmap, -90f)
+        }
+        return try {
+            candidates.map { candidate ->
+                val upright = if (classifier != null && shouldFlip(environment, classifier, candidate)) {
+                    rotate(candidate, 180f)
+                } else candidate
+                try {
+                    recognize(environment, recognizer, upright, keys)
+                } finally {
+                    if (upright !== candidate) upright.recycle()
+                }
+            }.maxByOrNull { it.score }?.let { CropReading(it.text.trim(), it.score) }
+                ?: CropReading("", 0f)
+        } finally {
+            candidates.filter { it !== bitmap }.forEach(Bitmap::recycle)
+        }
+    }
     private fun shouldFlip(env: OrtEnvironment, session: OrtSession, bitmap: Bitmap): Boolean {
         val resized = Bitmap.createScaledBitmap(bitmap, 192, 48, true)
         try {

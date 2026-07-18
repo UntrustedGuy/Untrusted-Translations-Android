@@ -5,3 +5,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "UntrustedTranslations"
 include(":app")
+include(":llama-runtime")

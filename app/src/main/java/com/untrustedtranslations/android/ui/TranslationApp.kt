@@ -66,12 +66,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.untrustedtranslations.android.R
 import com.untrustedtranslations.android.importer.ImportContract
 import com.untrustedtranslations.android.model.*
 import com.untrustedtranslations.android.processing.*
@@ -173,10 +175,29 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                         ModelPackCard(vm, ModelPackId.RAPID_OCR_CHINESE)
                         ModelPackCard(vm, ModelPackId.RAPID_OCR_LATIN)
                     }
-                    OcrProvider.MANGA_OCR -> ModelPackCard(vm, ModelPackId.MANGA_OCR_JAPANESE)
+                    OcrProvider.MANGA_OCR -> {
+                        ProviderNote(
+                            "Comic-specific AI detects speech-bubble dialogue and excludes free text and sound effects.",
+                        )
+                        ModelPackCard(vm, ModelPackId.MANGA_OCR_JAPANESE)
+                        if (vm.sourceScript != SourceScript.JAPANESE) {
+                            ProviderNote(
+                                "${vm.sourceScript.label} recognition also needs its matching RapidOCR pack.",
+                            )
+                            ModelPackCard(vm, ModelPackManager.rapidPack(vm.sourceScript))
+                        }
+                    }                    OcrProvider.COMIC_AI_VISION -> {
+                        ProviderNote(
+                            "High-quality fully local vision OCR. The comic detector supplies exact boxes; Qwen2-VL reads each bubble, with RapidOCR fallback so a failed vision response does not lose the block.",
+                        )
+                        ProviderNote("Device: ${vm.deviceProfile.summary}")
+                        ModelPackCard(vm, ModelPackId.VLM_OCR_HIGH)
+                        ModelPackCard(vm, ModelPackId.MANGA_OCR_JAPANESE)
+                        ModelPackCard(vm, ModelPackManager.rapidPack(vm.sourceScript))
+                    }
                     OcrProvider.RAPID_OCR_V5 -> {
                         Text(
-                            "PP-OCRv5 models from HuggingFace � improved detection. Experimental.",
+                            "PP-OCRv5 models from HuggingFace — improved detection. Experimental.",
                             color = AppColors.Muted,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -202,9 +223,7 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                 Selector(
                     label = "Translate text with",
                     value = vm.translationProvider.label,
-                    options = TranslationProvider.entries
-                        .filter { it != TranslationProvider.LOCAL_AI }
-                        .map { it.label },
+                    options = TranslationProvider.entries.map { it.label },
                 ) { label ->
                     vm.chooseTranslationProvider(
                         TranslationProvider.entries.first { it.label == label },
@@ -212,7 +231,29 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                 }
                 when (vm.translationProvider) {
                     TranslationProvider.NLLB -> ModelPackCard(vm, ModelPackId.NLLB_TRANSLATION)
-                    TranslationProvider.LOCAL_AI -> Unit
+                    TranslationProvider.LOCAL_AI -> {
+                        ProviderNote("Device: ${vm.deviceProfile.summary}")
+                        ProviderNote(
+                            "Models are optional downloads and run fully on this Android device. Higher tiers improve context and sentence quality but need more RAM.",
+                        )
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            listOf(
+                                ModelPackId.LOCAL_LLM_LOW to "Low",
+                                ModelPackId.LOCAL_LLM_MID to "Mid",
+                                ModelPackId.LOCAL_LLM_HIGH to "High",
+                            ).forEach { (pack, label) ->
+                                FilterChip(
+                                    selected = vm.localTranslationPack == pack,
+                                    onClick = { vm.chooseLocalTranslationPack(pack) },
+                                    label = { Text(label) },
+                                )
+                            }
+                        }
+                        ModelPackCard(vm, vm.localTranslationPack)
+                    }
                     TranslationProvider.GOOGLE_UNOFFICIAL -> ProviderNote(
                         "Unofficial / experimental. Free and needs no key or login, but Google can change or block it at any time. No cookies are used.",
                         warning = true,
@@ -460,9 +501,12 @@ private fun ImportScreen(vm: TranslationViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Spacer(Modifier.height(8.dp))
-        Surface(shape = RoundedCornerShape(24.dp), color = Color(0xFF211A38), modifier = Modifier.size(72.dp)) {
-            Icon(Icons.Default.FileOpen, null, Modifier.padding(19.dp), tint = AppColors.Cyan)
-        }
+        Image(
+            painter = painterResource(R.drawable.ic_launcher_art),
+            contentDescription = "Untrusted Translations icon",
+            modifier = Modifier.size(104.dp),
+            contentScale = ContentScale.Fit,
+        )
         Text(
             "Untrusted\nTranslations",
             style = MaterialTheme.typography.displaySmall,
@@ -480,7 +524,7 @@ private fun ImportScreen(vm: TranslationViewModel) {
         ) {
             Icon(Icons.Default.Settings, null)
             Spacer(Modifier.width(8.dp))
-            Text("OCR: ${vm.ocrProvider.label} ? TL: ${vm.translationProvider.label}")
+            Text("OCR: ${vm.ocrProvider.label}  ?  Translation: ${vm.translationProvider.label}")
         }
         Selector(
             label = "Text detection script",
@@ -597,6 +641,11 @@ private fun PageScreen(vm: TranslationViewModel) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = AppColors.Void),
+                navigationIcon = {
+                    IconButton(vm::returnHome, enabled = !vm.placementUpdating) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Save project and return home")
+                    }
+                },
                 actions = {
                     IconButton(vm::undo, enabled = vm.canUndo) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
                     IconButton(vm::redo, enabled = vm.canRedo) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo") }
@@ -643,7 +692,7 @@ private fun PageScreen(vm: TranslationViewModel) {
             )
             if (vm.placementUpdating) {
                 Text(
-                    "Rendering placement?",
+                    "Saving text placement…",
                     color = AppColors.Cyan,
                     style = MaterialTheme.typography.labelSmall,
                 )
@@ -655,14 +704,10 @@ private fun PageScreen(vm: TranslationViewModel) {
                     enabled = project.currentPageIndex > 0 && !vm.placementUpdating,
                 ) { Text("Previous page") }
                 OutlinedButton(
-                    vm::returnHome,
+                    vm::save,
                     modifier = Modifier.weight(1f),
                     enabled = !vm.placementUpdating,
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
-                    Spacer(Modifier.width(5.dp))
-                    Text("Home")
-                }
+                ) { Text("Save page") }
                 Button(
                     onClick = { if (vm.isLastPage) vm.saveAndExit() else vm.saveAndNext() },
                     modifier = Modifier.weight(1f),
@@ -769,22 +814,8 @@ private fun EditorScreen(vm: TranslationViewModel) {
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3,
             )
-            Selector("Font", block.style.font.label, FontChoice.entries.map { it.label }) { label ->
-                vm.updateFont(FontChoice.entries.first { it.label == label })
-            }
-            Selector("Alignment", block.style.alignment.label, TextAlignmentChoice.entries.map { it.label }) { label ->
-                vm.updateAlignment(TextAlignmentChoice.entries.first { it.label == label })
-            }
-            Selector("Text color", textColors.getValue(block.style.textColorArgb), textColors.values.toList()) { label ->
-                vm.updateTextColor(textColors.entries.first { it.value == label }.key)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(block.style.bold, { vm.updateBold(!block.style.bold) }, { Text("Bold") })
-                FilterChip(block.style.italic, { vm.updateItalic(!block.style.italic) }, { Text("Italic") })
-                FilterChip(block.style.vertical, { vm.updateVertical(!block.style.vertical) }, { Text("Vertical") })
-            }
             Text(
-                "Apply the text, then move, resize, or rotate it directly on the manga page.",
+                "Apply the text, then set its size, position, and rotation directly on the manga page.",
                 color = AppColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
             )

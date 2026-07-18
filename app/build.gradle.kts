@@ -11,10 +11,18 @@ android {
         applicationId = "com.untrustedtranslations.android"
         minSdk = 23
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.4.0"
+        versionCode = 11
+        versionName = "0.5.0-beta.1"
     }
     buildFeatures { compose = true }
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = false
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -26,6 +34,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":llama-runtime"))
     val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)

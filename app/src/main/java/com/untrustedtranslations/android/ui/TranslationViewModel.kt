@@ -18,6 +18,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.ArrayDeque
 import java.util.UUID
+import com.untrustedtranslations.android.util.AiTier
+import com.untrustedtranslations.android.util.DeviceTierDetector
 
 enum class AppScreen { IMPORT, PAGE, EDITOR }
 
@@ -38,6 +40,14 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     var manualBackgroundArgb by mutableStateOf<Long?>(null); private set
     var ocrProvider by mutableStateOf(OcrProvider.ML_KIT); private set
     var translationProvider by mutableStateOf(TranslationProvider.ML_KIT); private set
+    val deviceProfile = DeviceTierDetector.profile(application)
+    var localTranslationPack by mutableStateOf(
+        when (deviceProfile.recommendedTier) {
+            AiTier.LOW -> ModelPackId.LOCAL_LLM_LOW
+            AiTier.MID -> ModelPackId.LOCAL_LLM_MID
+            AiTier.HIGH -> ModelPackId.LOCAL_LLM_HIGH
+        },
+    ); private set
     var geminiApiKeyDraft by mutableStateOf(""); private set
     var openAiApiKeyDraft by mutableStateOf(""); private set
     var anthropicApiKeyDraft by mutableStateOf(""); private set
@@ -82,10 +92,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     private fun loadProviderDrafts() {
         SecureAiSettings.load(getApplication()).let {
             ocrProvider = it.ocrProvider
-            // LOCAL_AI is being rebuilt as the local LLM provider; fall back until a pack exists.
-            translationProvider = if (it.translationProvider == TranslationProvider.LOCAL_AI) {
-                TranslationProvider.ML_KIT
-            } else it.translationProvider
+            translationProvider = it.translationProvider
+
             geminiApiKeyDraft = it.geminiApiKey
             openAiApiKeyDraft = it.openAiApiKey
             anthropicApiKeyDraft = it.anthropicApiKey
@@ -102,6 +110,10 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun dismissAiSettings() { showAiSettingsDialog = false }
     fun chooseOcrProvider(value: OcrProvider) { ocrProvider = value }
     fun chooseTranslationProvider(value: TranslationProvider) { translationProvider = value }
+    fun chooseLocalTranslationPack(value: ModelPackId) {
+        require(value in LocalLlmTranslationEngine.localLlmPacks)
+        localTranslationPack = value
+    }
     fun updateGeminiApiKey(value: String) { geminiApiKeyDraft = value }
     fun updateOpenAiApiKey(value: String) { openAiApiKeyDraft = value }
     fun updateAnthropicApiKey(value: String) { anthropicApiKeyDraft = value }
@@ -199,23 +211,35 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun deletePack(id: ModelPackId) = viewModelScope.launch {
         if (id == ModelPackId.NLLB_TRANSLATION) NllbTranslationEngine.release()
+        if (id in LocalLlmTranslationEngine.localLlmPacks) LocalLlmTranslationEngine.release()
+        if (id == ModelPackId.VLM_OCR_HIGH) VisionLlmRuntime.release()
         OnnxSessionCache.release(id.name)
         ModelPackManager.delete(getApplication(), id)
-        if (id == requiredOcrPack(ocrProvider)) ocrProvider = OcrProvider.ML_KIT
+        if (id in requiredOcrPacks(ocrProvider)) ocrProvider = OcrProvider.ML_KIT
         if (id == requiredTranslationPack(translationProvider)) translationProvider = TranslationProvider.ML_KIT
         packRevision++
         saveProviderDrafts()
     }
 
-    private fun requiredOcrPack(provider: OcrProvider): ModelPackId? = when (provider) {
-        OcrProvider.RAPID_OCR -> ModelPackManager.rapidPack(sourceScript)
-        OcrProvider.RAPID_OCR_V5 -> ModelPackManager.rapidPack(sourceScript, useV5 = true)
-        OcrProvider.MANGA_OCR -> ModelPackId.MANGA_OCR_JAPANESE
-        OcrProvider.GEMINI_FREE, OcrProvider.ML_KIT -> null
+    private fun requiredOcrPacks(provider: OcrProvider): List<ModelPackId> = when (provider) {
+        OcrProvider.RAPID_OCR -> listOf(ModelPackManager.rapidPack(sourceScript))
+        OcrProvider.RAPID_OCR_V5 -> listOf(ModelPackManager.rapidPack(sourceScript, useV5 = true))
+        OcrProvider.MANGA_OCR -> if (sourceScript == SourceScript.JAPANESE) {
+            listOf(ModelPackId.MANGA_OCR_JAPANESE)
+        } else {
+            listOf(ModelPackId.MANGA_OCR_JAPANESE, ModelPackManager.rapidPack(sourceScript))
+        }
+        OcrProvider.COMIC_AI_VISION -> listOf(
+            ModelPackId.MANGA_OCR_JAPANESE,
+            ModelPackId.VLM_OCR_HIGH,
+            ModelPackManager.rapidPack(sourceScript),
+        )
+        OcrProvider.GEMINI_FREE, OcrProvider.ML_KIT -> emptyList()
     }
 
     private fun requiredTranslationPack(provider: TranslationProvider): ModelPackId? = when (provider) {
         TranslationProvider.NLLB -> ModelPackId.NLLB_TRANSLATION
+        TranslationProvider.LOCAL_AI -> localTranslationPack
         else -> null
     }
 
@@ -258,11 +282,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun processCurrentPage(deepScan: Boolean = false) = viewModelScope.launch {
         val page = currentPage ?: return@launch
         val ocrPack = ModelPackManager.rapidPack(sourceScript, ocrProvider == OcrProvider.RAPID_OCR_V5)
-        if (ocrProvider == OcrProvider.MANGA_OCR && sourceScript != SourceScript.JAPANESE) {
-            errorMessage = "Manga-OCR is currently Japanese-only. Choose a different script or OCR engine."
-            return@launch
-        }
-        requiredOcrPack(ocrProvider)?.let { pack ->
+        requiredOcrPacks(ocrProvider).forEach { pack ->
             if (!isPackInstalled(pack)) {
                 errorMessage = "Download the ${ModelPackManager.info(pack).title} pack first."
                 return@launch
@@ -278,7 +298,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             OcrProvider.GEMINI_FREE -> "Detecting dialogue with Gemini..."
             OcrProvider.RAPID_OCR -> "Detecting dialogue with RapidOCR..."
             OcrProvider.RAPID_OCR_V5 -> "Detecting dialogue with PP-OCRv5..."
-            OcrProvider.MANGA_OCR -> "Reading page with Manga-OCR (vision transformer)..."
+            OcrProvider.MANGA_OCR -> "Reading dialogue with Comic AI..."
+            OcrProvider.COMIC_AI_VISION -> "Reading dialogue with local Comic AI Vision..."
             OcrProvider.ML_KIT -> if (deepScan) "Deep scanning dialogue..." else "Detecting dialogue..."
         }
         perf.start()
@@ -297,8 +318,26 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 OcrProvider.RAPID_OCR_V5 -> RapidOcrPageEngine.process(
                     getApplication(), page, sourceScript, ocrPack,
                 )
-                OcrProvider.MANGA_OCR -> MangaOcrPageEngine.process(
-                    getApplication(), page, sourceScript, ModelPackId.MANGA_OCR_JAPANESE,
+                OcrProvider.MANGA_OCR -> if (sourceScript == SourceScript.JAPANESE) {
+                    MangaOcrPageEngine.process(
+                        getApplication(), page, sourceScript, ModelPackId.MANGA_OCR_JAPANESE,
+                    )
+                } else {
+                    ComicAiPageEngine.process(
+                        getApplication(),
+                        page,
+                        sourceScript,
+                        ModelPackId.MANGA_OCR_JAPANESE,
+                        ModelPackManager.rapidPack(sourceScript),
+                    )
+                }
+                OcrProvider.COMIC_AI_VISION -> ComicVisionPageEngine.process(
+                    getApplication(),
+                    page,
+                    sourceScript,
+                    ModelPackId.MANGA_OCR_JAPANESE,
+                    ModelPackId.VLM_OCR_HIGH,
+                    ModelPackManager.rapidPack(sourceScript),
                 )
             }
             val manualBlocks = page.blocks.filter { it.eraseBounds == null }
@@ -327,9 +366,12 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             }
             perf.log("${page.displayName} ocr=${ocrProvider.name} tl=${translationProvider.name}")
         }
-        if (translationProvider == TranslationProvider.NLLB) {
-            NllbTranslationEngine.release()
+        when (translationProvider) {
+            TranslationProvider.NLLB -> NllbTranslationEngine.release()
+            TranslationProvider.LOCAL_AI -> LocalLlmTranslationEngine.release()
+            else -> Unit
         }
+        if (ocrProvider == OcrProvider.COMIC_AI_VISION) VisionLlmRuntime.release()
     }
 
 
@@ -494,7 +536,11 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             val translation = translateWithSelectedProvider(block.originalText)
             editBlock { withAutomaticTranslationLayout(translation).copy(applied = false) }
         }
-        if (translationProvider == TranslationProvider.NLLB) NllbTranslationEngine.release()
+        when (translationProvider) {
+            TranslationProvider.NLLB -> NllbTranslationEngine.release()
+            TranslationProvider.LOCAL_AI -> LocalLlmTranslationEngine.release()
+            else -> Unit
+        }
     }
 
     private suspend fun translateWithSelectedProvider(text: String): String =
@@ -508,8 +554,9 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             TranslationProvider.NLLB -> NllbTranslationEngine.translate(
                 getApplication(), text, sourceLanguageTag, targetLanguageTag,
             )
-            TranslationProvider.LOCAL_AI ->
-                error("Local AI translation is not available yet.")
+            TranslationProvider.LOCAL_AI -> LocalLlmTranslationEngine.translate(
+                getApplication(), localTranslationPack, text, sourceLanguageTag, targetLanguageTag,
+            )
             TranslationProvider.GOOGLE_UNOFFICIAL -> RemoteTranslationEngines.unofficialGoogle(
                 text, sourceLanguageTag, targetLanguageTag,
             )

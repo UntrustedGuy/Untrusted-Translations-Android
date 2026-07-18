@@ -9,7 +9,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -122,14 +121,26 @@ fun ManipulablePagePreview(
                                 requireUnconsumed = false,
                                 pass = PointerEventPass.Initial,
                             )
-                            val up = waitForUpOrCancellation(pass = PointerEventPass.Final)
-                            if (up != null) {
-                                val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
-                                val hit = page.blocks.indices.reversed().firstOrNull { index ->
-                                    page.blocks[index].applied &&
-                                        page.blocks[index].bounds.toPageRect(geometry).contains(down.position)
+                            var isTap = true
+                            while (true) {
+                                // Observe before the drag recognizer consumes movement. This keeps
+                                // tap selection and direct dragging independent from each other.
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                                    isTap = false
                                 }
-                                if (hit != null) onSelectBlock(hit)
+                                if (!change.pressed) {
+                                    if (isTap) {
+                                        val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
+                                        val hit = page.blocks.indices.reversed().firstOrNull { index ->
+                                            page.blocks[index].applied &&
+                                                page.blocks[index].bounds.toPageRect(geometry).contains(down.position)
+                                        }
+                                        if (hit != null) onSelectBlock(hit)
+                                    }
+                                    break
+                                }
                             }
                         }
                     }

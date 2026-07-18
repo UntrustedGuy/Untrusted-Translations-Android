@@ -40,6 +40,35 @@ object PageRenderer {
             Uri.fromFile(output)
         }
 
+    /** Returns the exact fitted size used by the bitmap renderer so gesture previews do not jump. */
+    fun fittedFontSizeSp(
+        context: Context,
+        imageWidth: Int,
+        imageHeight: Int,
+        block: TextBlock,
+    ): Float {
+        val rect = RectF(
+            block.bounds.left * imageWidth,
+            block.bounds.top * imageHeight,
+            block.bounds.right * imageWidth,
+            block.bounds.bottom * imageHeight,
+        )
+        if (rect.width() < 2f || rect.height() < 2f) return block.style.fontSizeSp
+        val padding = (rect.width() * .06f).coerceAtLeast(4f)
+        val textWidth = (rect.width() - padding * 2).toInt().coerceAtLeast(20)
+        val renderText = if (block.style.vertical) verticalize(block.translatedText) else block.translatedText
+        var textSize = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP,
+            block.style.fontSizeSp,
+            context.resources.displayMetrics,
+        )
+        var textLayout = layout(context, renderText, textWidth, textSize, block)
+        while (textLayout.height > rect.height() - padding * 2 && textSize > 10f) {
+            textSize -= 1f
+            textLayout = layout(context, renderText, textWidth, textSize, block)
+        }
+        return textSize / context.resources.displayMetrics.scaledDensity.coerceAtLeast(.01f)
+    }
     private fun drawBlock(context: Context, bitmap: Bitmap, canvas: Canvas, block: TextBlock) {
         val rect = RectF(
             block.bounds.left * bitmap.width,

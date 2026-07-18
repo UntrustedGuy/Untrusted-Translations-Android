@@ -314,7 +314,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                         if (errorMessage == null) errorMessage = "Translation failed: ${error.message}"
                         block.originalText
                     }
-                block.copy(translatedText = result)
+                block.withAutomaticTranslationLayout(result)
             }
             recordState()
             replaceCurrentPage(
@@ -379,18 +379,22 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         if (index in (currentPage?.blocks?.indices ?: IntRange.EMPTY)) selectedBlockIndex = index
     }
 
-    fun commitPageTransform(index: Int, bounds: RelativeBounds, rotationDegrees: Float) {
+    fun commitPageTransform(index: Int, bounds: RelativeBounds, rotationDegrees: Float, resized: Boolean) {
         val page = currentPage ?: return
         val block = page.blocks.getOrNull(index) ?: return
         if (busyMessage != null) return
         if (block.bounds == bounds && block.style.rotationDegrees == rotationDegrees) return
         val oldHeight = (block.bounds.bottom - block.bounds.top).coerceAtLeast(.001f)
         val newHeight = (bounds.bottom - bounds.top).coerceAtLeast(.001f)
-        val resizedFont = (block.style.fontSizeSp * newHeight / oldHeight).coerceIn(8f, 160f)
+        val nextFontSize = if (resized) {
+            (block.style.fontSizeSp * newHeight / oldHeight).coerceIn(8f, 160f)
+        } else {
+            block.style.fontSizeSp
+        }
         val transformed = block.copy(
             bounds = bounds,
             style = block.style.copy(
-                fontSizeSp = resizedFont,
+                fontSizeSp = nextFontSize,
                 rotationDegrees = rotationDegrees,
             ),
             applied = true,
@@ -404,7 +408,6 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         placementRenderJob?.cancel()
         placementUpdating = true
         placementRenderJob = viewModelScope.launch {
-            delay(180)
             try {
                 val pageForRender = currentPage ?: return@launch
                 if (pageForRender.id != page.id) return@launch
@@ -489,7 +492,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         val block = currentBlock ?: return@launch
         runBusy("Translating selected text...") {
             val translation = translateWithSelectedProvider(block.originalText)
-            editBlock { copy(translatedText = translation, applied = false) }
+            editBlock { withAutomaticTranslationLayout(translation).copy(applied = false) }
         }
         if (translationProvider == TranslationProvider.NLLB) NllbTranslationEngine.release()
     }
@@ -658,6 +661,38 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         finally { busyMessage = null }
     }
 
+    private fun TextBlock.withAutomaticTranslationLayout(translation: String): TextBlock {
+        val targetUsesVerticalWriting = targetLanguageTag == "ja" || targetLanguageTag.startsWith("zh")
+        val sourceWasVertical = style.vertical
+        val adaptedBounds = if (sourceWasVertical && !targetUsesVerticalWriting) {
+            horizontalTranslationBounds(bounds, translation)
+        } else {
+            bounds
+        }
+        return copy(
+            translatedText = translation,
+            bounds = adaptedBounds,
+            style = style.copy(
+                font = if (targetUsesVerticalWriting) style.font else FontChoice.MANGA,
+                vertical = sourceWasVertical && targetUsesVerticalWriting,
+            ),
+        )
+    }
+
+    private fun horizontalTranslationBounds(source: RelativeBounds, translatedText: String): RelativeBounds {
+        val characters = translatedText.count { !it.isWhitespace() }.coerceAtLeast(1)
+        val lines = ((characters + 17) / 18).coerceAtLeast(1)
+        val sourceWidth = source.right - source.left
+        val sourceHeight = source.bottom - source.top
+        val desiredWidth = maxOf(sourceWidth * 3.2f, (.10f + characters * .007f).coerceAtMost(.45f))
+            .coerceIn(.08f, .5f)
+        val desiredHeight = maxOf(sourceHeight * .9f, .055f * lines).coerceIn(.05f, .32f)
+        val centerX = (source.left + source.right) / 2f
+        val centerY = (source.top + source.bottom) / 2f
+        val left = (centerX - desiredWidth / 2f).coerceIn(0f, 1f - desiredWidth)
+        val top = (centerY - desiredHeight / 2f).coerceIn(0f, 1f - desiredHeight)
+        return RelativeBounds(left, top, left + desiredWidth, top + desiredHeight)
+    }
     private fun resizeBounds(bounds: RelativeBounds, centerX: Float? = null, centerY: Float? = null, width: Float? = null, height: Float? = null): RelativeBounds {
         val newWidth = (width ?: bounds.right - bounds.left).coerceIn(.05f, 1f)
         val newHeight = (height ?: bounds.bottom - bounds.top).coerceIn(.05f, 1f)

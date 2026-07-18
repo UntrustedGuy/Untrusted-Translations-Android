@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import com.untrustedtranslations.android.model.ComicPage
 import com.untrustedtranslations.android.model.FontChoice
 import com.untrustedtranslations.android.model.RelativeBounds
+import com.untrustedtranslations.android.processing.PageRenderer
 import kotlin.math.atan2
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -61,7 +62,7 @@ fun ManipulablePagePreview(
     selectedBlockIndex: Int,
     mode: PageTransformMode,
     onSelectBlock: (Int) -> Unit,
-    onTransformCommitted: (Int, RelativeBounds, Float) -> Unit,
+    onTransformCommitted: (Int, RelativeBounds, Float, Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var bitmap by remember(page.renderedSource) { mutableStateOf<android.graphics.Bitmap?>(null) }
@@ -81,6 +82,15 @@ fun ManipulablePagePreview(
         mutableStateOf(selected?.bounds ?: RelativeBounds(.25f, .4f, .75f, .6f))
     }
     var draftRotation by remember(page.id, selected?.id, selected?.style?.rotationDegrees) {
+        mutableStateOf(selected?.style?.rotationDegrees ?: 0f)
+    }
+    var sourceBounds by remember(page.id, selected?.id) {
+        mutableStateOf(selected?.bounds ?: RelativeBounds(.25f, .4f, .75f, .6f))
+    }
+    var sourceFontSizeSp by remember(page.id, selected?.id) {
+        mutableStateOf(selected?.style?.fontSizeSp ?: 22f)
+    }
+    var sourceRotation by remember(page.id, selected?.id) {
         mutableStateOf(selected?.style?.rotationDegrees ?: 0f)
     }
     var dragHandle by remember { mutableStateOf(PageDragHandle.NONE) }
@@ -117,6 +127,9 @@ fun ManipulablePagePreview(
                                     activeIndex = selectedBlockIndex
                                     draftBounds = activeBlock.bounds
                                     draftRotation = activeBlock.style.rotationDegrees
+                                    sourceBounds = activeBlock.bounds
+                                    sourceFontSizeSp = activeBlock.style.fontSizeSp
+                                    sourceRotation = activeBlock.style.rotationDegrees
                                     previewPending = true
                                     dragHandle = currentHandle
                                 } else {
@@ -129,6 +142,9 @@ fun ManipulablePagePreview(
                                         activeIndex = hit
                                         draftBounds = block.bounds
                                         draftRotation = block.style.rotationDegrees
+                                        sourceBounds = block.bounds
+                                        sourceFontSizeSp = block.style.fontSizeSp
+                                        sourceRotation = block.style.rotationDegrees
                                         previewPending = true
                                         onSelectBlock(hit)
                                         dragHandle = PageDragHandle.MOVE
@@ -169,7 +185,11 @@ fun ManipulablePagePreview(
                             },
                             onDragEnd = {
                                 if (dragHandle != PageDragHandle.NONE && activeIndex in page.blocks.indices) {
-                                    onTransformCommitted(activeIndex, draftBounds, draftRotation)
+                                    val resized = dragHandle == PageDragHandle.LEFT ||
+                                        dragHandle == PageDragHandle.TOP ||
+                                        dragHandle == PageDragHandle.RIGHT ||
+                                        dragHandle == PageDragHandle.BOTTOM
+                                    onTransformCommitted(activeIndex, draftBounds, draftRotation, resized)
                                 }
                                 dragHandle = PageDragHandle.NONE
                             },
@@ -185,16 +205,39 @@ fun ManipulablePagePreview(
                 val liveBlock = page.blocks.getOrNull(activeIndex)
                 if (previewPending && liveBlock?.applied == true && viewport != IntSize.Zero) {
                     val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
-                    val oldRect = liveBlock.bounds.toPageRect(geometry)
+                    val oldRect = sourceBounds.toPageRect(geometry)
                     val liveRect = draftBounds.toPageRect(geometry)
                     val density = LocalDensity.current
                     val liveWidth = with(density) { liveRect.width.toDp() }
                     val liveHeight = with(density) { liveRect.height.toDp() }
-                    val sourceHeight = (liveBlock.bounds.bottom - liveBlock.bounds.top).coerceAtLeast(.001f)
+                    val sourceHeight = (sourceBounds.bottom - sourceBounds.top).coerceAtLeast(.001f)
                     val draftHeight = (draftBounds.bottom - draftBounds.top).coerceAtLeast(.001f)
+                    val requestedFontSize = (sourceFontSizeSp * draftHeight / sourceHeight).coerceIn(8f, 160f)
+                    val draftWidth = draftBounds.right - draftBounds.left
+                    val draftPixelWidth = (draftWidth * bmp.width).roundToInt()
+                    val draftPixelHeight = (draftHeight * bmp.height).roundToInt()
+                    val requestedFontStep = (requestedFontSize * 10f).roundToInt()
+                    val fittedFontSize = remember(
+                        liveBlock.id,
+                        liveBlock.translatedText,
+                        liveBlock.style,
+                        draftPixelWidth,
+                        draftPixelHeight,
+                        requestedFontStep,
+                    ) {
+                        PageRenderer.fittedFontSizeSp(
+                            context,
+                            bmp.width,
+                            bmp.height,
+                            liveBlock.copy(
+                                bounds = draftBounds,
+                                style = liveBlock.style.copy(fontSizeSp = requestedFontSize),
+                            ),
+                        )
+                    }
                     val displayScale = geometry.width / bmp.width.coerceAtLeast(1)
-                    val liveFontSizeSp = liveBlock.style.fontSizeSp * (draftHeight / sourceHeight) * displayScale
-                    if (oldRect != liveRect) {
+                    val liveFontSizeSp = fittedFontSize * displayScale
+                    if (oldRect != liveRect || draftRotation != sourceRotation) {
                         Box(
                             Modifier
                                 .offset {
@@ -211,14 +254,21 @@ fun ManipulablePagePreview(
                         text = liveBlock.translatedText,
                         color = Color(liveBlock.style.textColorArgb.toInt()),
                         fontSize = liveFontSizeSp.coerceIn(4f, 160f).sp,
-                        fontFamily = if (liveBlock.style.font == FontChoice.MANGA) {
-                            mangaFont
-                        } else {
-                            FontFamily.Default
+                        fontFamily = when (liveBlock.style.font) {
+                            FontChoice.AUTO, FontChoice.SANS -> FontFamily.Default
+                            FontChoice.SERIF -> FontFamily.Serif
+                            FontChoice.CONDENSED -> FontFamily(Typeface.create("sans-serif-condensed", Typeface.NORMAL))
+                            FontChoice.MONOSPACE -> FontFamily.Monospace
+                            FontChoice.CASUAL -> FontFamily(Typeface.create("casual", Typeface.NORMAL))
+                            FontChoice.MANGA -> mangaFont
                         },
                         fontWeight = if (liveBlock.style.bold) FontWeight.Bold else FontWeight.Normal,
                         fontStyle = if (liveBlock.style.italic) FontStyle.Italic else FontStyle.Normal,
-                        textAlign = TextAlign.Center,
+                        textAlign = when (liveBlock.style.alignment) {
+                            com.untrustedtranslations.android.model.TextAlignmentChoice.START -> TextAlign.Start
+                            com.untrustedtranslations.android.model.TextAlignmentChoice.CENTER -> TextAlign.Center
+                            com.untrustedtranslations.android.model.TextAlignmentChoice.END -> TextAlign.End
+                        },
                         modifier = Modifier
                             .offset {
                                 IntOffset(liveRect.left.roundToInt(), liveRect.top.roundToInt())
@@ -337,4 +387,3 @@ private fun normalizeDegrees(value: Float): Float {
     while (normalized < -180f) normalized += 360f
     return normalized
 }
-

@@ -50,6 +50,12 @@ Java_com_untrustedtranslations_android_processing_VisionLlmRuntime_nativeLoad(
     ggml_backend_load_all_from_path(lib_dir);
     env->ReleaseStringUTFChars(lib_dir_j, lib_dir);
     llama_backend_init();
+    const size_t backend_count = ggml_backend_dev_count();
+    LOGE("Loaded %zu backend devices for Vision High", backend_count);
+    if (backend_count == 0) {
+        last_error = "No llama.cpp CPU backend was extracted from the APK.";
+        return 4;
+    }
 
     const char * model_path = env->GetStringUTFChars(model_path_j, nullptr);
     auto model_params = llama_model_default_params();

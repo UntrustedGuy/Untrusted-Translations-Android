@@ -11,8 +11,8 @@ android {
         applicationId = "com.untrustedtranslations.android"
         minSdk = 23
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.5.0-beta.3"
+        versionCode = 14
+        versionName = "0.6.0-beta.1"
     }
     buildFeatures { compose = true }
     splits {
@@ -30,6 +30,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
     packaging {
         jniLibs.keepDebugSymbols += "**/*.so"
+        jniLibs.useLegacyPackaging = true
     }
 }
 

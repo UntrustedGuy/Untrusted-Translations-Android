@@ -80,6 +80,7 @@ internal object VisionLlmRuntime {
                 1 -> "the 986 MB text model"
                 2 -> "the text context"
                 3 -> "the 710 MB vision projector"
+                4 -> "the packaged CPU backend"
                 else -> "the vision runtime"
             }
             error(

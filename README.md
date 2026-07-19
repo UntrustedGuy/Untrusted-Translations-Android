@@ -148,7 +148,7 @@ On Windows, use `.\gradlew.bat :app:assembleDebug`. If you cloned without submod
 
 ## Thanks and credits
 
-Untrusted Translations is written and maintained by me, [UntrustedGuy](https://github.com/UntrustedGuy). That said, it wouldn't exist in its current form without a lot of open work from other people, most of it shared under the Apache License 2.0 — which asks exactly one thing in return: credit. So, credit where it's due:
+Untrusted Translations wouldn't exist in its current form without a lot of open work from other people:
 
 - [ImageTrans](https://www.basiccat.org/imagetrans/) and [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) showed what a good computer-assisted comic translation workflow could look like. This project is an original Android implementation, not a port of either codebase.
 - [ogkalu](https://huggingface.co/ogkalu/comic-text-and-bubble-detector) published the RT-DETR-v2 comic text/bubble detector used to separate dialogue from free text (Apache-2.0).

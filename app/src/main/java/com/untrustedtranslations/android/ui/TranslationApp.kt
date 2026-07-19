@@ -697,7 +697,6 @@ private fun PageScreen(vm: TranslationViewModel) {
                 mode = transformMode,
                 onSelectBlock = vm::selectBlock,
                 onTransformCommitted = vm::commitPageTransform,
-                onBlockTextScaled = vm::scaleBlockFontSize,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -716,7 +715,13 @@ private fun PageScreen(vm: TranslationViewModel) {
             }
             val selectedBlock = page.blocks.getOrNull(vm.selectedBlockIndex)
             if (selectedBlock?.applied == true) {
-                val percent = (selectedBlock.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).roundToInt()
+                val committedPercent = (selectedBlock.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100)
+                    .coerceIn(25f, 400f)
+                // The slider only previews locally while dragging; a single commit fires on
+                // release — committing every tick re-rendered the page bitmap per pixel moved.
+                var sliderPercent by remember(selectedBlock.id, selectedBlock.style.fontSizeSp) {
+                    mutableStateOf(committedPercent)
+                }
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -724,16 +729,16 @@ private fun PageScreen(vm: TranslationViewModel) {
                 ) {
                     Text("Text size", color = AppColors.Muted, style = MaterialTheme.typography.labelMedium)
                     Slider(
-                        value = percent.toFloat().coerceIn(25f, 400f),
-                        onValueChange = { value ->
-                            vm.setBlockFontSize(vm.selectedBlockIndex, BASE_TEXT_SIZE_SP * value / 100f)
+                        value = sliderPercent,
+                        onValueChange = { sliderPercent = it },
+                        onValueChangeFinished = {
+                            vm.setBlockFontSize(vm.selectedBlockIndex, BASE_TEXT_SIZE_SP * sliderPercent / 100f)
                         },
                         valueRange = 25f..400f,
-                        enabled = !vm.placementUpdating,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        "$percent%",
+                        "${sliderPercent.roundToInt()}%",
                         color = AppColors.Cyan,
                         style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier.width(52.dp),
@@ -743,7 +748,7 @@ private fun PageScreen(vm: TranslationViewModel) {
             }
             Text(
                 if (transformMode == PageTransformMode.RESIZE) {
-                    "Pinch empty page area to zoom. Pinch the selected text to change its size, or use the slider. Drag text to move; edge handles resize the box."
+                    "Pinch the selected text to resize it live; pinch anywhere else to zoom the page. Drag text to move; edge handles resize the box."
                 } else {
                     "Pinch empty page area to zoom. Tap applied text. Drag inside to move; drag the round handle above it to rotate."
                 },

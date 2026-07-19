@@ -82,15 +82,20 @@ fun ManipulablePagePreview(
     mode: PageTransformMode,
     onSelectBlock: (Int) -> Unit,
     onTransformCommitted: (Int, RelativeBounds, Float, Boolean) -> Unit,
-    onBlockTextScaled: (Int, Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var bitmap by remember(page.renderedSource) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    // Keyed by page id, not the rendered file: when a re-render lands we keep showing the
+    // previous bitmap (plus the live draft overlay) until the new one is decoded, so the
+    // page never blanks or snaps while the background renderer catches up.
+    var bitmap by remember(page.id) { mutableStateOf<android.graphics.Bitmap?>(null) }
     val context = LocalContext.current
+    var previewPending by remember(page.id) { mutableStateOf(false) }
     LaunchedEffect(page.renderedSource) {
-        withContext(Dispatchers.IO) {
-            val bmp = page.renderedSource.path?.let(BitmapFactory::decodeFile); bitmap = bmp
+        val bmp = withContext(Dispatchers.IO) {
+            page.renderedSource.path?.let(BitmapFactory::decodeFile)
         }
+        if (bmp != null) bitmap = bmp
+        previewPending = false
     }
     val mangaFont = remember {
         FontFamily(Typeface.createFromAsset(context.assets, "fonts/comic_neue_bold.ttf"))
@@ -116,10 +121,6 @@ fun ManipulablePagePreview(
         mutableStateOf(selected?.style?.rotationDegrees ?: 0f)
     }
     var dragHandle by remember { mutableStateOf(PageDragHandle.NONE) }
-    var previewPending by remember(page.id) { mutableStateOf(false) }
-    LaunchedEffect(page.renderedSource) {
-        previewPending = false
-    }
     val shape = RoundedCornerShape(18.dp)
 
     Box(
@@ -144,19 +145,20 @@ fun ManipulablePagePreview(
             Box(
                 Modifier.fillMaxSize().padding(6.dp)
                     .onSizeChanged { viewport = it }
-                    .clip(RoundedCornerShape(12.dp))
+                    // Clip only while zoomed in; at rest the draft preview must be free to
+                    // overhang the page edge (rotated text near a border was getting cut).
+                    .then(if (zoomScale > 1.001f) Modifier.clip(RoundedCornerShape(12.dp)) else Modifier)
                     .pointerInput(page.blocks, selectedBlockIndex, viewport) {
                         // Screen-space pinch handling; runs outside the zoom layer so its
                         // coordinates are stable while the transform changes underneath.
-                        // A pinch that starts on the selected text block scales that block's
-                        // text; anywhere else it zooms the page (Add Text style).
+                        // A pinch that starts on the selected text block scales that block
+                        // (box + text together, live); anywhere else it zooms the page.
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                             var panningView = false
                             var decided = false
                             var pinchingBlock = false
                             var pinchDecided = false
-                            var blockPinchFactor = 1f
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
                                 val pressed = event.changes.filter { it.pressed }
@@ -168,14 +170,23 @@ fun ManipulablePagePreview(
                                         val centroid = event.calculateCentroid()
                                         val local = (centroid - zoomOffset) / zoomScale
                                         val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
-                                        val selectedRect = page.blocks.getOrNull(selectedBlockIndex)
-                                            ?.takeIf { it.applied }
-                                            ?.bounds?.toPageRect(geometry)
+                                        val block = page.blocks.getOrNull(selectedBlockIndex)?.takeIf { it.applied }
+                                        val selectedRect = block?.bounds?.toPageRect(geometry)
                                         pinchingBlock = selectedRect?.inflate(24.dp.toPx())
                                             ?.contains(local) == true
+                                        if (pinchingBlock && block != null) {
+                                            activeIndex = selectedBlockIndex
+                                            draftBounds = block.bounds
+                                            draftRotation = block.style.rotationDegrees
+                                            sourceBounds = block.bounds
+                                            sourceFontSizeSp = block.style.fontSizeSp
+                                            sourceRotation = block.style.rotationDegrees
+                                            previewPending = true
+                                        }
                                     }
                                     if (pinchingBlock) {
-                                        blockPinchFactor *= event.calculateZoom()
+                                        val zoom = event.calculateZoom()
+                                        if (zoom != 1f) draftBounds = draftBounds.scaledAroundCenter(zoom)
                                         event.changes.forEach { it.consume() }
                                     } else {
                                         applyZoom(
@@ -208,8 +219,12 @@ fun ManipulablePagePreview(
                                     }
                                 }
                                 if (event.changes.none { it.pressed }) {
-                                    if (pinchingBlock && blockPinchFactor != 1f) {
-                                        onBlockTextScaled(selectedBlockIndex, blockPinchFactor)
+                                    if (pinchingBlock && activeIndex in page.blocks.indices) {
+                                        if (draftBounds != sourceBounds) {
+                                            onTransformCommitted(activeIndex, draftBounds, draftRotation, true)
+                                        } else {
+                                            previewPending = false
+                                        }
                                     }
                                     break
                                 }
@@ -356,10 +371,13 @@ fun ManipulablePagePreview(
                     val draftHeight = (draftBounds.bottom - draftBounds.top).coerceAtLeast(.001f)
                     val requestedFontSize = (sourceFontSizeSp * draftHeight / sourceHeight).coerceIn(8f, 160f)
                     val draftWidth = draftBounds.right - draftBounds.left
-                    val draftPixelWidth = (draftWidth * bmp.width).roundToInt()
-                    val draftPixelHeight = (draftHeight * bmp.height).roundToInt()
-                    val requestedFontStep = (requestedFontSize * 10f).roundToInt()
-                    val fittedFontSize = remember(
+                    // Quantized keys: re-fitting text is a StaticLayout loop, far too heavy to
+                    // run on every gesture frame. Between recomputes the last fitted size is
+                    // scaled linearly with the box, which is visually indistinguishable.
+                    val draftPixelWidth = ((draftWidth * bmp.width) / 24f).roundToInt() * 24
+                    val draftPixelHeight = ((draftHeight * bmp.height) / 24f).roundToInt() * 24
+                    val requestedFontStep = (requestedFontSize / 2f).roundToInt()
+                    val fittedInfo = remember(
                         liveBlock.id,
                         liveBlock.translatedText,
                         liveBlock.style,
@@ -375,10 +393,11 @@ fun ManipulablePagePreview(
                                 bounds = draftBounds,
                                 style = liveBlock.style.copy(fontSizeSp = requestedFontSize),
                             ),
-                        )
+                        ) to requestedFontSize
                     }
                     val displayScale = geometry.width / bmp.width.coerceAtLeast(1)
-                    val liveFontSizeSp = fittedFontSize * displayScale
+                    val liveFontSizeSp = fittedInfo.first *
+                        (requestedFontSize / fittedInfo.second.coerceAtLeast(.01f)) * displayScale
                     if (oldRect != liveRect || draftRotation != sourceRotation) {
                         Box(
                             Modifier
@@ -555,6 +574,19 @@ private fun RelativeBounds.toPageRect(image: Rect) = Rect(
     image.left + right * image.width,
     image.top + bottom * image.height,
 )
+
+private fun RelativeBounds.scaledAroundCenter(factor: Float): RelativeBounds {
+    val cx = (left + right) / 2f
+    val cy = (top + bottom) / 2f
+    val halfWidth = ((right - left) / 2f * factor).coerceIn(.0175f, .5f)
+    val halfHeight = ((bottom - top) / 2f * factor).coerceIn(.0175f, .5f)
+    return RelativeBounds(
+        (cx - halfWidth).coerceIn(0f, 1f),
+        (cy - halfHeight).coerceIn(0f, 1f),
+        (cx + halfWidth).coerceIn(0f, 1f),
+        (cy + halfHeight).coerceIn(0f, 1f),
+    )
+}
 
 private fun RelativeBounds.moveBy(dx: Float, dy: Float): RelativeBounds {
     val width = right - left

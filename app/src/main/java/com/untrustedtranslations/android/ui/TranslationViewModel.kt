@@ -512,18 +512,29 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         if (busyMessage != null || !block.applied) return
         val nextSize = sizeSp.coerceIn(6f, 160f)
         if (nextSize == block.style.fontSizeSp) return
+        // The renderer autofits text into its box, so a font change alone is invisible —
+        // grow/shrink the box around its center by the same ratio, like a pinch does.
+        val ratio = nextSize / block.style.fontSizeSp.coerceAtLeast(.01f)
+        val cx = (block.bounds.left + block.bounds.right) / 2f
+        val cy = (block.bounds.top + block.bounds.bottom) / 2f
+        val halfWidth = ((block.bounds.right - block.bounds.left) / 2f * ratio).coerceIn(.0175f, .5f)
+        val halfHeight = ((block.bounds.bottom - block.bounds.top) / 2f * ratio).coerceIn(.0175f, .5f)
+        val nextBounds = RelativeBounds(
+            (cx - halfWidth).coerceIn(0f, 1f),
+            (cy - halfHeight).coerceIn(0f, 1f),
+            (cx + halfWidth).coerceIn(0f, 1f),
+            (cy + halfHeight).coerceIn(0f, 1f),
+        )
         val blocks = page.blocks.toMutableList().apply {
-            this[index] = block.copy(style = block.style.copy(fontSizeSp = nextSize))
+            this[index] = block.copy(
+                bounds = nextBounds,
+                style = block.style.copy(fontSizeSp = nextSize),
+            )
         }
         recordState()
         replaceCurrentPage(page.copy(blocks = blocks, saved = false), record = false)
         selectedBlockIndex = index
         schedulePlacementRender(page.id)
-    }
-
-    fun scaleBlockFontSize(index: Int, factor: Float) {
-        val block = currentPage?.blocks?.getOrNull(index) ?: return
-        setBlockFontSize(index, block.style.fontSizeSp * factor)
     }
 
     private fun schedulePlacementRender(pageId: String) {

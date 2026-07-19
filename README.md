@@ -24,6 +24,10 @@ Fair warning — the automatic passes aren't magic. OCR will miss weird letterin
 | --- | --- |
 | <img src="docs/screenshots/move-resize.png" width="320" alt="Translated page with a selected text block in Move / Resize mode, edge handles and text-size slider visible"> | <img src="docs/screenshots/move-rotate.png" width="320" alt="Same block in Move / Rotate mode with the rotation handle above it"> |
 
+| Adding your own text |
+| --- |
+| <img src="docs/screenshots/add-text.png" width="320" alt="Add text dialog with the manga font and an optional white or black background"> |
+
 ## What it can do
 
 - Import PNG, JPEG, WebP, PDF, CBZ, ZIP, or a whole folder of images.

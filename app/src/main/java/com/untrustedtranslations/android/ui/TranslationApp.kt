@@ -79,8 +79,12 @@ import com.untrustedtranslations.android.importer.ImportContract
 import com.untrustedtranslations.android.model.*
 import com.untrustedtranslations.android.processing.*
 import java.text.DateFormat
+import kotlin.math.roundToInt
 import java.util.Date
 import java.util.Locale
+
+// 100% on the text-size controls equals this font size, matching the default block size.
+private const val BASE_TEXT_SIZE_SP = 24f
 
 private val targetTags = listOf(
     "af", "ar", "be", "bg", "bn", "ca", "cs", "cy", "da", "de", "el", "en", "eo", "es",
@@ -693,6 +697,7 @@ private fun PageScreen(vm: TranslationViewModel) {
                 mode = transformMode,
                 onSelectBlock = vm::selectBlock,
                 onTransformCommitted = vm::commitPageTransform,
+                onBlockTextScaled = vm::scaleBlockFontSize,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -708,24 +713,39 @@ private fun PageScreen(vm: TranslationViewModel) {
                     label = { Text("Move / Rotate") },
                     enabled = page.blocks.any { it.applied },
                 )
-                Spacer(Modifier.weight(1f))
-                val selectedApplied = page.blocks.getOrNull(vm.selectedBlockIndex)?.applied == true
-                OutlinedButton(
-                    onClick = { vm.adjustBlockFontSize(vm.selectedBlockIndex, -2f) },
-                    enabled = selectedApplied && !vm.placementUpdating,
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                ) { Text("A−", fontSize = 16.sp) }
-                OutlinedButton(
-                    onClick = { vm.adjustBlockFontSize(vm.selectedBlockIndex, 2f) },
-                    enabled = selectedApplied && !vm.placementUpdating,
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                ) { Text("A+", fontSize = 16.sp) }
+            }
+            val selectedBlock = page.blocks.getOrNull(vm.selectedBlockIndex)
+            if (selectedBlock?.applied == true) {
+                val percent = (selectedBlock.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).roundToInt()
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Text size", color = AppColors.Muted, style = MaterialTheme.typography.labelMedium)
+                    Slider(
+                        value = percent.toFloat().coerceIn(25f, 400f),
+                        onValueChange = { value ->
+                            vm.setBlockFontSize(vm.selectedBlockIndex, BASE_TEXT_SIZE_SP * value / 100f)
+                        },
+                        valueRange = 25f..400f,
+                        enabled = !vm.placementUpdating,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "$percent%",
+                        color = AppColors.Cyan,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.width(52.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    )
+                }
             }
             Text(
                 if (transformMode == PageTransformMode.RESIZE) {
-                    "Pinch to zoom the page. Tap applied text, then drag to move it, use the edge handles to resize, or A− / A+ for the text size."
+                    "Pinch empty page area to zoom. Pinch the selected text to change its size, or use the slider. Drag text to move; edge handles resize the box."
                 } else {
-                    "Pinch to zoom the page. Tap applied text. Drag inside to move; drag the round handle above it to rotate."
+                    "Pinch empty page area to zoom. Tap applied text. Drag inside to move; drag the round handle above it to rotate."
                 },
                 color = AppColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
@@ -857,7 +877,12 @@ private fun EditorScreen(vm: TranslationViewModel) {
             Selector("Font", block.style.font.label, FontChoice.entries.map { it.label }) { label ->
                 vm.updateFont(FontChoice.entries.first { it.label == label })
             }
-            ValueSlider("Text size", block.style.fontSizeSp, 8f..96f, "sp", vm::updateFontSize)
+            Text("Text size: ${(block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).roundToInt()}%")
+            Slider(
+                value = (block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).coerceIn(25f, 400f),
+                onValueChange = { vm.updateFontSize(BASE_TEXT_SIZE_SP * it / 100f) },
+                valueRange = 25f..400f,
+            )
             Selector("Alignment", block.style.alignment.label, TextAlignmentChoice.entries.map { it.label }) { label ->
                 vm.updateAlignment(TextAlignmentChoice.entries.first { it.label == label })
             }

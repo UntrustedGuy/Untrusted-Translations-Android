@@ -82,6 +82,7 @@ fun ManipulablePagePreview(
     mode: PageTransformMode,
     onSelectBlock: (Int) -> Unit,
     onTransformCommitted: (Int, RelativeBounds, Float, Boolean) -> Unit,
+    onBlockTextScaled: (Int, Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var bitmap by remember(page.renderedSource) { mutableStateOf<android.graphics.Bitmap?>(null) }
@@ -144,26 +145,47 @@ fun ManipulablePagePreview(
                 Modifier.fillMaxSize().padding(6.dp)
                     .onSizeChanged { viewport = it }
                     .clip(RoundedCornerShape(12.dp))
-                    .pointerInput(page.blocks, viewport) {
-                        // Screen-space pinch zoom and pan; runs outside the zoom layer so its
+                    .pointerInput(page.blocks, selectedBlockIndex, viewport) {
+                        // Screen-space pinch handling; runs outside the zoom layer so its
                         // coordinates are stable while the transform changes underneath.
+                        // A pinch that starts on the selected text block scales that block's
+                        // text; anywhere else it zooms the page (Add Text style).
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                             var panningView = false
                             var decided = false
+                            var pinchingBlock = false
+                            var pinchDecided = false
+                            var blockPinchFactor = 1f
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
                                 val pressed = event.changes.filter { it.pressed }
                                 if (pressed.size >= 2) {
-                                    decided = true
-                                    panningView = false
-                                    applyZoom(
-                                        zoomScale * event.calculateZoom(),
-                                        event.calculateCentroid(),
-                                        event.calculatePan(),
-                                    )
-                                    event.changes.forEach { it.consume() }
-                                } else if (pressed.size == 1 && zoomScale > 1f) {
+                                    if (!pinchDecided) {
+                                        pinchDecided = true
+                                        decided = true
+                                        panningView = false
+                                        val centroid = event.calculateCentroid()
+                                        val local = (centroid - zoomOffset) / zoomScale
+                                        val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
+                                        val selectedRect = page.blocks.getOrNull(selectedBlockIndex)
+                                            ?.takeIf { it.applied }
+                                            ?.bounds?.toPageRect(geometry)
+                                        pinchingBlock = selectedRect?.inflate(24.dp.toPx())
+                                            ?.contains(local) == true
+                                    }
+                                    if (pinchingBlock) {
+                                        blockPinchFactor *= event.calculateZoom()
+                                        event.changes.forEach { it.consume() }
+                                    } else {
+                                        applyZoom(
+                                            zoomScale * event.calculateZoom(),
+                                            event.calculateCentroid(),
+                                            event.calculatePan(),
+                                        )
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                } else if (pressed.size == 1 && zoomScale > 1f && !pinchingBlock) {
                                     if (!decided) {
                                         val moved = (pressed[0].position - down.position).getDistance()
                                         if (moved > viewConfiguration.touchSlop) {
@@ -185,7 +207,12 @@ fun ManipulablePagePreview(
                                         change.consume()
                                     }
                                 }
-                                if (event.changes.none { it.pressed }) break
+                                if (event.changes.none { it.pressed }) {
+                                    if (pinchingBlock && blockPinchFactor != 1f) {
+                                        onBlockTextScaled(selectedBlockIndex, blockPinchFactor)
+                                    }
+                                    break
+                                }
                             }
                         }
                     }

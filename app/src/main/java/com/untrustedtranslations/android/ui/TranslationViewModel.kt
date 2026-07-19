@@ -506,11 +506,11 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         schedulePlacementRender(page.id)
     }
 
-    fun adjustBlockFontSize(index: Int, delta: Float) {
+    fun setBlockFontSize(index: Int, sizeSp: Float) {
         val page = currentPage ?: return
         val block = page.blocks.getOrNull(index) ?: return
         if (busyMessage != null || !block.applied) return
-        val nextSize = (block.style.fontSizeSp + delta).coerceIn(8f, 160f)
+        val nextSize = sizeSp.coerceIn(6f, 160f)
         if (nextSize == block.style.fontSizeSp) return
         val blocks = page.blocks.toMutableList().apply {
             this[index] = block.copy(style = block.style.copy(fontSizeSp = nextSize))
@@ -519,6 +519,11 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         replaceCurrentPage(page.copy(blocks = blocks, saved = false), record = false)
         selectedBlockIndex = index
         schedulePlacementRender(page.id)
+    }
+
+    fun scaleBlockFontSize(index: Int, factor: Float) {
+        val block = currentPage?.blocks?.getOrNull(index) ?: return
+        setBlockFontSize(index, block.style.fontSizeSp * factor)
     }
 
     private fun schedulePlacementRender(pageId: String) {

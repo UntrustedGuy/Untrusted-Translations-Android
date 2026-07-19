@@ -8,14 +8,26 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
@@ -26,10 +38,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -81,6 +95,8 @@ fun ManipulablePagePreview(
         FontFamily(Typeface.createFromAsset(context.assets, "fonts/comic_neue_bold.ttf"))
     }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
+    var zoomScale by remember(page.id) { mutableStateOf(1f) }
+    var zoomOffset by remember(page.id) { mutableStateOf(Offset.Zero) }
     var activeIndex by remember(page.id, selectedBlockIndex) { mutableIntStateOf(selectedBlockIndex) }
     val selected = page.blocks.getOrNull(selectedBlockIndex)
     var draftBounds by remember(page.id, selected?.id, selected?.bounds) {
@@ -112,9 +128,74 @@ fun ManipulablePagePreview(
     ) {
         if (bitmap != null) {
             val bmp = bitmap!!
+            fun applyZoom(targetScale: Float, focus: Offset, pan: Offset = Offset.Zero) {
+                val newScale = targetScale.coerceIn(1f, 6f)
+                val change = if (zoomScale == 0f) 1f else newScale / zoomScale
+                val unclamped = focus - (focus - zoomOffset) * change + pan
+                val width = viewport.width.toFloat()
+                val height = viewport.height.toFloat()
+                zoomScale = newScale
+                zoomOffset = Offset(
+                    unclamped.x.coerceIn(width - width * newScale, 0f),
+                    unclamped.y.coerceIn(height - height * newScale, 0f),
+                )
+            }
             Box(
                 Modifier.fillMaxSize().padding(6.dp)
                     .onSizeChanged { viewport = it }
+                    .clip(RoundedCornerShape(12.dp))
+                    .pointerInput(page.blocks, viewport) {
+                        // Screen-space pinch zoom and pan; runs outside the zoom layer so its
+                        // coordinates are stable while the transform changes underneath.
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            var panningView = false
+                            var decided = false
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val pressed = event.changes.filter { it.pressed }
+                                if (pressed.size >= 2) {
+                                    decided = true
+                                    panningView = false
+                                    applyZoom(
+                                        zoomScale * event.calculateZoom(),
+                                        event.calculateCentroid(),
+                                        event.calculatePan(),
+                                    )
+                                    event.changes.forEach { it.consume() }
+                                } else if (pressed.size == 1 && zoomScale > 1f) {
+                                    if (!decided) {
+                                        val moved = (pressed[0].position - down.position).getDistance()
+                                        if (moved > viewConfiguration.touchSlop) {
+                                            decided = true
+                                            // Pan the view only when the touch began on empty page
+                                            // area; touches on a block keep moving the block.
+                                            val local = (down.position - zoomOffset) / zoomScale
+                                            val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
+                                            val inflation = 40.dp.toPx()
+                                            panningView = page.blocks.none { block ->
+                                                block.applied && block.bounds.toPageRect(geometry)
+                                                    .inflate(inflation).contains(local)
+                                            }
+                                        }
+                                    }
+                                    if (panningView) {
+                                        val change = pressed[0]
+                                        applyZoom(zoomScale, Offset.Zero, change.position - change.previousPosition)
+                                        change.consume()
+                                    }
+                                }
+                                if (event.changes.none { it.pressed }) break
+                            }
+                        }
+                    }
+                    .graphicsLayer {
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        scaleX = zoomScale
+                        scaleY = zoomScale
+                        translationX = zoomOffset.x
+                        translationY = zoomOffset.y
+                    }
                     .pointerInput(page.blocks, viewport) {
                         awaitEachGesture {
                             val down = awaitFirstDown(
@@ -359,7 +440,49 @@ fun ManipulablePagePreview(
                     }
                 }
             }
+            Row(
+                Modifier.align(Alignment.BottomEnd).padding(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (zoomScale > 1.01f) {
+                    Text(
+                        "${(zoomScale * 100).roundToInt()}%",
+                        color = AppColors.Cyan,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .background(Color(0xCC15131D), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+                ZoomControlButton(Icons.Default.ZoomOut, "Zoom out") {
+                    applyZoom(zoomScale / 1.5f, Offset(viewport.width / 2f, viewport.height / 2f))
+                }
+                ZoomControlButton(Icons.Default.ZoomIn, "Zoom in") {
+                    applyZoom(zoomScale * 1.5f, Offset(viewport.width / 2f, viewport.height / 2f))
+                }
+                if (zoomScale > 1.01f) {
+                    ZoomControlButton(Icons.Default.CenterFocusStrong, "Reset zoom") {
+                        zoomScale = 1f
+                        zoomOffset = Offset.Zero
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun ZoomControlButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    onClick: () -> Unit,
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.size(38.dp).background(Color(0xCC15131D), CircleShape),
+    ) {
+        Icon(icon, description, tint = AppColors.Cyan, modifier = Modifier.size(22.dp))
     }
 }
 

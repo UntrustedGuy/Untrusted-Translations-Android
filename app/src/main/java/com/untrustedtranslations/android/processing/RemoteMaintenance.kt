@@ -1,6 +1,7 @@
 package com.untrustedtranslations.android.processing
 
 import android.content.Context
+import android.util.Log
 import com.untrustedtranslations.android.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,8 +27,12 @@ internal data class ModelFileOverride(
  * new APK. Model overrides are accepted only for approved upstream hosts and only with a SHA-256.
  */
 internal object RemoteMaintenance {
-    private const val MANIFEST_URL =
-        "https://raw.githubusercontent.com/UntrustedGuy/Untrusted-Translations-Android/main/update-config.json"
+    private const val TAG = "RemoteMaintenance"
+    private val MANIFEST_URLS = listOf(
+        "https://raw.githubusercontent.com/UntrustedGuy/Untrusted-Translations-Android/main/update-config.json",
+        // Mirror for networks that block raw.githubusercontent.com.
+        "https://cdn.jsdelivr.net/gh/UntrustedGuy/Untrusted-Translations-Android@main/update-config.json",
+    )
     private const val PREFS = "remote_maintenance"
     private const val CACHED_JSON = "cached_json"
     private const val DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
@@ -42,19 +47,31 @@ internal object RemoteMaintenance {
     )
 
     suspend fun refresh(context: Context): Boolean = withContext(Dispatchers.IO) {
-        val connection = URL(MANIFEST_URL).openConnection() as HttpURLConnection
-        try {
+        MANIFEST_URLS.any { url -> fetchAndCache(context, url) }
+    }
+
+    private fun fetchAndCache(context: Context, manifestUrl: String): Boolean {
+        val connection = URL(manifestUrl).openConnection() as HttpURLConnection
+        return try {
             connection.connectTimeout = 12_000
             connection.readTimeout = 12_000
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("User-Agent", "Untrusted-Translations-Android/${BuildConfig.VERSION_NAME}")
-            if (connection.responseCode !in 200..299) return@withContext false
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                Log.w(TAG, "Manifest fetch from $manifestUrl failed with HTTP $code")
+                return false
+            }
             val raw = connection.inputStream.bufferedReader().use { it.readText() }
-            parse(raw) ?: return@withContext false
+            if (parse(raw) == null) {
+                Log.w(TAG, "Manifest from $manifestUrl rejected by validation")
+                return false
+            }
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit().putString(CACHED_JSON, raw).apply()
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Manifest fetch from $manifestUrl failed", e)
             false
         } finally {
             connection.disconnect()

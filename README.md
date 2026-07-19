@@ -1,14 +1,14 @@
 # Untrusted Translations
 
-**Translate and re-letter manga, manhwa, manhua, and comics on Android — without sending the whole job to a PC.**
+**Translate and re-letter manga, manhwa, manhua, and comics right on your Android phone.**
 
-This project started with a simple frustration: translating a chapter on a phone meant jumping between an OCR app, a translator, an image editor, and a file manager. Untrusted Translations keeps that work in one project. Import a volume, review the dialogue one page at a time, correct the translation, and place the finished text back on the artwork.
+I built this out of a simple frustration: translating a chapter on a phone meant juggling an OCR app, a translator, an image editor, and a file manager, and losing my place in all four. Untrusted Translations keeps the whole job in one project. Import a volume, go through the dialogue page by page, fix the translation where it needs fixing, and put the finished text back on the artwork.
 
-It is still a beta. OCR will miss unusual lettering, translations will sometimes sound wrong, and automatic cleanup cannot understand every speech bubble. The editor is there because the human pass matters.
+Fair warning — it's still a beta. OCR will miss weird lettering, translations will sometimes sound off, and automatic cleanup can't understand every speech bubble. That's exactly why the editor exists: the human pass is the point.
 
 [Download the latest beta](https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases) · [Report a bug](https://github.com/UntrustedGuy/Untrusted-Translations-Android/issues)
 
-> Only translate work you have permission to use. Always review a page before publishing it.
+> Please only translate work you have permission to use, and look over a page before you publish it.
 
 ## A look at the app
 
@@ -22,73 +22,74 @@ It is still a beta. OCR will miss unusual lettering, translations will sometimes
 
 ## What it can do
 
-- Import PNG, JPEG, WebP, PDF, CBZ, ZIP, or a folder of images.
-- Keep archive pages in natural order, so page 2 comes before page 10.
-- Detect dialogue while deliberately filtering out likely sound effects and decorative text.
+- Import PNG, JPEG, WebP, PDF, CBZ, ZIP, or a whole folder of images.
+- Keep archive pages in natural order, so page 2 actually comes before page 10.
+- Detect dialogue while deliberately skipping likely sound effects and decorative text.
 - Let you fix both the recognized source text and its translation.
 - Replace dialogue on the page, then tap a block to move, resize, or rotate it.
+- Pinch to zoom into a page (or use the zoom buttons) for precise placement, and bump the text size up or down with the A− / A+ buttons or the editor slider.
 - Add your own text with the bundled manga font and an optional background.
-- Change font, alignment, colour, bold, italic, and vertical-text settings when needed.
-- Save the current page, return to a previous page, or use **Save & Next** when you are actually ready to move on.
+- Change font, size, alignment, colour, bold, italic, and vertical-text settings when you need to.
+- Save the current page, go back to an earlier one, or hit **Save & Next** when you're actually done with it.
 - Recover editable projects from private app storage and export a separate translated copy.
 
-The original import is never edited in place. Images export as PNG, PDF as PDF, CBZ as CBZ, and ZIP/folder projects as ZIP under `Downloads/Untrusted Translations`.
+Your original import is never edited in place. Images export as PNG, PDF as PDF, CBZ as CBZ, and ZIP/folder projects as ZIP under `Downloads/Untrusted Translations`.
 
 ## Install
 
-The current build is **0.7.0 Beta 1**. Most physical Android phones need the **ARM64** APK; the x86_64 build is mainly for emulators.
+The current build is **0.7.0 Beta 1**. Most physical Android phones want the **ARM64** APK; the x86_64 build is mainly for emulators.
 
-If you already have the app installed, update it directly. Do not uninstall first unless you also want to remove your projects, settings, and downloaded models.
+If you already have the app installed, update over it. Don't uninstall first unless you also want to wipe your projects, settings, and downloaded models.
 
-Models are not hidden inside the APK. Optional OCR and translation packs are downloaded from their credited upstream projects only when you choose them.
+The models aren't hidden inside the APK. Optional OCR and translation packs are downloaded from their credited upstream projects only when you pick them.
 
-At launch, the app checks a small repository manifest for a newer release, a replacement Gemini model name, and corrected model download links. Every remotely changed model file must use an approved HTTPS host and include its expected SHA-256 hash. The app shows an **Update available** card for newer APKs; Android still asks before installing them.
+At launch the app checks a small manifest in this repository for a newer release, a replacement Gemini model name, and corrected model download links. Any remotely changed model file has to come from an approved HTTPS host and carry its expected SHA-256 hash. When a newer APK exists you'll get an update prompt — and Android still asks before installing anything.
 
 ## A normal translation session
 
 1. Pick the text-detection script, source language, and target language.
 2. Open **OCR & translation** and choose one dialogue recognizer and one translator.
-3. Download any optional model you want, then tap **Use model**. Downloading a model does not activate it automatically.
+3. Download any optional model you want, then tap **Use model**. Downloading a model doesn't activate it by itself.
 4. Import a page, archive, PDF, or folder.
 5. Check the detected dialogue. Try **Deep scan** if a real speech bubble was missed.
 6. Open the editor, repair the OCR text and translation, then apply it.
-7. Tap the replacement on the page to position, resize, or rotate it.
+7. Tap the replacement on the page to position, resize, or rotate it. Zoom in if the bubble is small.
 8. Save the page, go back, or choose **Save & Next**. On the final page, use **Save & Exit**.
 
-There is no automatic page advance. A long archive moves forward only when you save and ask it to.
+There's no automatic page advance. A long archive only moves forward when you save and tell it to.
 
 ## Detection script vs. source language
 
-These are separate because OCR and translation need different information.
+These are separate settings because OCR and translation need different information.
 
 - **Text detection script** chooses the alphabet/model family: Japanese, Korean, Chinese, or Latin.
-- **Translate from** identifies the actual language that should be translated.
+- **Translate from** identifies the actual language being translated.
 
-For example, a French comic should use **Latin** for detection and **French** as the source language. A Japanese manga normally uses Japanese for both.
+So a French comic should use **Latin** for detection and **French** as the source language. A Japanese manga normally uses Japanese for both.
 
 ## OCR choices
 
-Every recognizer is paired with the shared comic-dialogue detector. That first stage finds bubble text and rejects likely free text/SFX; the selected OCR then reads the accepted crops. **Deep scan** relaxes the detector, but it still tries to avoid sound effects.
+Every recognizer is paired with the shared comic-dialogue detector. That first stage finds bubble text and rejects likely free text/SFX; the OCR you selected then reads the accepted crops. **Deep scan** relaxes the detector, but it still tries to avoid sound effects.
 
 - **Baberu OCR** — a compact multilingual manga-bubble recognizer for Japanese, Chinese, and English.
 - **Manga-OCR** — a Japanese specialist that handles vertical text, furigana, and manga lettering.
 - **RapidOCR / PP-OCRv5** — small script-specific PaddleOCR-derived ONNX packs.
 - **Qwen2-VL Vision High** — a much larger local vision model for difficult pages.
 - **Google ML Kit** — the quick baseline for clean printed text.
-- **Gemini** — optional online page OCR using the user's own API key and quota.
+- **Gemini** — optional online page OCR using your own API key and quota.
 
-One recognizer is active at a time. Installing three models does not make the app silently combine all three.
+One recognizer is active at a time. Installing three models doesn't make the app silently combine all three.
 
 ## Translation choices
 
 - **Local Qwen3** — fully on-device contextual translation in Low (about 485 MB), Mid (about 1.28 GB), and High (about 2.50 GB) sizes.
-- **Google ML Kit** — lightweight offline translation after its language pack is available.
-- **NLLB-200 (legacy)** — about 950 MB and ARM64 only. It is a general-domain research model, not manga-tuned, and its short-dialogue translations can be poor. The model is **CC BY-NC 4.0 and non-commercial**.
-- **Gemini** — official API access using the user's own key/free quota.
-- **Google Translate (unofficial)** — experimental no-key endpoint that may be rate-limited or disappear.
-- **OpenAI, Claude, or a custom OpenAI-compatible endpoint** — optional bring-your-own-key services. Provider billing and terms apply.
+- **Google ML Kit** — lightweight offline translation once its language pack is available.
+- **NLLB-200 (legacy)** — about 950 MB and ARM64 only. It's a general-domain research model, not manga-tuned, and its short-dialogue translations can be rough. The model is **CC BY-NC 4.0 and non-commercial**.
+- **Gemini** — official API access using your own key/free quota.
+- **Google Translate (unofficial)** — experimental no-key endpoint that may get rate-limited or disappear.
+- **OpenAI, Claude, or a custom OpenAI-compatible endpoint** — bring-your-own-key services. Provider billing and terms apply.
 
-A ChatGPT or Claude website subscription cannot be reused as API credit. The app never includes a shared developer key and never switches someone to a paid service without their configuration.
+A ChatGPT or Claude website subscription can't be reused as API credit. The app never ships a shared developer key and never switches you to a paid service without your configuration.
 
 ## Local model sizes
 
@@ -103,22 +104,22 @@ A ChatGPT or Claude website subscription cannot be reused as API credit. The app
 | Qwen2-VL Vision High | 1.70 GB | 6 GB+ |
 | Qwen3 translation High | 2.50 GB | 7 GB+ |
 
-Those figures are download sizes, not guarantees. Page resolution, Android memory pressure, and the phone's CPU affect speed and whether a large model can run comfortably. Downloads resume where the host supports it, and pinned large files are checked against their expected SHA-256 hashes before activation.
+Those figures are download sizes, not guarantees. Page resolution, Android memory pressure, and your phone's CPU all affect speed and whether a large model runs comfortably. Downloads resume where the host supports it, and pinned large files are checked against their expected SHA-256 hashes before activation.
 
 ## Privacy
 
-Local providers keep OCR and translation on the device. Online providers receive the image or text needed for the selected request and operate under their own privacy policies.
+Local providers keep OCR and translation on the device. Online providers receive the image or text needed for the request you made and operate under their own privacy policies.
 
-API keys are encrypted with AES-GCM using a non-exportable Android Keystore key. They can be removed from settings. Originals and working project files stay in app-controlled storage; only an exported copy is written to Downloads.
+API keys are encrypted with AES-GCM using a non-exportable Android Keystore key, and you can remove them from settings any time. Originals and working project files stay in app-controlled storage; only an exported copy is written to Downloads.
 
 ## Known beta limitations
 
-- OCR is not perfect, especially with handwriting, very stylized fonts, low-resolution scans, or unusual bubble shapes.
-- Dialogue filtering can reject a real line or admit an SFX. Deep scan helps with misses but is intentionally not a “detect everything” mode.
-- Automatic text removal and lettering will not match every original font or painted background.
-- Large local models can take time to load and may be impractical on lower-memory phones.
-- CBR/RAR import is not supported yet.
-- This is currently a debug-signed prerelease. Keep backups of important projects.
+- OCR isn't perfect, especially with handwriting, very stylized fonts, low-resolution scans, or unusual bubble shapes.
+- Dialogue filtering can reject a real line or let an SFX through. Deep scan helps with misses but is intentionally not a "detect everything" mode.
+- Automatic text removal and lettering won't match every original font or painted background.
+- Large local models take a while to load and may be impractical on lower-memory phones.
+- CBR/RAR import isn't supported yet.
+- This is currently a debug-signed prerelease. Keep backups of anything important.
 
 ## Building from source
 
@@ -130,13 +131,11 @@ cd Untrusted-Translations-Android
 ./gradlew :app:assembleDebug
 ```
 
-On Windows, use `.\gradlew.bat :app:assembleDebug`. If you cloned without submodules, run `git submodule update --init --recursive` first. The first build is slow because llama.cpp is compiled for ARM64 and x86_64.
+On Windows, use `.\gradlew.bat :app:assembleDebug`. If you cloned without submodules, run `git submodule update --init --recursive` first. The first build is slow because llama.cpp gets compiled for ARM64 and x86_64.
 
 ## Thanks and credits
 
-This app would not exist in its current form without a lot of open work from other people:
-
-Untrusted Translations is developed and maintained by [UntrustedGuy](https://github.com/UntrustedGuy).
+Untrusted Translations is written and maintained by me, [UntrustedGuy](https://github.com/UntrustedGuy). That said, it wouldn't exist in its current form without a lot of open work from other people:
 
 - [ImageTrans](https://www.basiccat.org/imagetrans/) and [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) showed what a good computer-assisted comic translation workflow could look like. This project is an original Android implementation, not a port of either codebase.
 - [ogkalu](https://huggingface.co/ogkalu/comic-text-and-bubble-detector) published the RT-DETR-v2 comic text/bubble detector used to separate dialogue from free text.
@@ -147,8 +146,6 @@ Untrusted Translations is developed and maintained by [UntrustedGuy](https://git
 - The [Qwen team](https://huggingface.co/Qwen) created Qwen3 and Qwen2-VL; [bartowski](https://huggingface.co/bartowski) published the Qwen3 GGUF quantizations; and [ggml-org](https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF) published the Qwen2-VL GGUF model/projector.
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) provides local GGUF inference, [ONNX Runtime](https://github.com/microsoft/onnxruntime) runs the ONNX models, and Android/Kotlin/Jetpack Compose/Google ML Kit provide the platform and lightweight mobile ML pieces.
 - [Comic Neue](https://github.com/crozynski/comicneue), by the Comic Neue project authors, is the bundled lettering font under the SIL Open Font License 1.1.
-
-The launcher icon was created specifically for this project from the book/translation mark and the user's pierced-heart artwork direction, with OpenAI's image-generation tool used during production.
 
 For exact licenses, model restrictions, upstream links, and service terms, read [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Bundled texts include the [llama.cpp MIT license](third_party/llama.cpp/LICENSE), [Comic Neue OFL-1.1](app/src/main/assets/fonts/OFL-ComicNeue.txt), and the [Apache License 2.0](RTRANSLATOR_LICENSE.txt).
 

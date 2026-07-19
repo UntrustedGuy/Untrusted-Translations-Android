@@ -59,6 +59,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     var modelPackProgress by mutableStateOf<ModelPackProgress?>(null); private set
     var availableUpdate by mutableStateOf<AppUpdateInfo?>(null); private set
     var checkingForUpdates by mutableStateOf(false); private set
+    var showUpdatePrompt by mutableStateOf(false); private set
     private var packRevision by mutableStateOf(0)
     val hasGeminiApiKey get() = geminiApiKeyDraft.isNotBlank()
 
@@ -99,13 +100,20 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         val refreshed = RemoteMaintenance.refresh(getApplication())
         availableUpdate = RemoteMaintenance.availableAppUpdate(getApplication())
         if (showResult) {
-            noticeMessage = when {
-                availableUpdate != null -> "Version ${availableUpdate?.version} is available."
-                refreshed -> "Gemini and model download information is current."
-                else -> "Could not check right now. The last verified settings will still be used."
+            if (availableUpdate != null) {
+                showUpdatePrompt = true
+            } else {
+                noticeMessage = if (refreshed) "No updates found." else "Could not check right now."
             }
         }
         checkingForUpdates = false
+    }
+
+    fun dismissUpdatePrompt() { showUpdatePrompt = false }
+
+    fun acceptUpdatePrompt() {
+        showUpdatePrompt = false
+        openAvailableUpdate()
     }
 
     fun openAvailableUpdate() {
@@ -495,18 +503,36 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         recordState()
         replaceCurrentPage(page.copy(blocks = blocks, saved = false), record = false)
         selectedBlockIndex = index
+        schedulePlacementRender(page.id)
+    }
 
+    fun adjustBlockFontSize(index: Int, delta: Float) {
+        val page = currentPage ?: return
+        val block = page.blocks.getOrNull(index) ?: return
+        if (busyMessage != null || !block.applied) return
+        val nextSize = (block.style.fontSizeSp + delta).coerceIn(8f, 160f)
+        if (nextSize == block.style.fontSizeSp) return
+        val blocks = page.blocks.toMutableList().apply {
+            this[index] = block.copy(style = block.style.copy(fontSizeSp = nextSize))
+        }
+        recordState()
+        replaceCurrentPage(page.copy(blocks = blocks, saved = false), record = false)
+        selectedBlockIndex = index
+        schedulePlacementRender(page.id)
+    }
+
+    private fun schedulePlacementRender(pageId: String) {
         val generation = ++placementGeneration
         placementRenderJob?.cancel()
         placementUpdating = true
         placementRenderJob = viewModelScope.launch {
             try {
                 val pageForRender = currentPage ?: return@launch
-                if (pageForRender.id != page.id) return@launch
+                if (pageForRender.id != pageId) return@launch
                 val rendered = PageRenderer.apply(getApplication(), pageForRender, pageForRender.blocks)
                 if (generation == placementGeneration) {
                     val latest = currentPage
-                    if (latest?.id == page.id) {
+                    if (latest?.id == pageId) {
                         replaceCurrentPage(latest.copy(renderedSource = rendered), record = false)
                     }
                 }

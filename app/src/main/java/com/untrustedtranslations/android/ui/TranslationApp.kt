@@ -11,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -127,6 +128,15 @@ fun TranslationApp(vm: TranslationViewModel = viewModel()) {
             confirmButton = { TextButton(vm::dismissNotice) { Text("OK") } },
             title = { Text("Finished") },
             text = { Text(message) },
+        )
+    }
+    if (vm.showUpdatePrompt) {
+        AlertDialog(
+            onDismissRequest = vm::dismissUpdatePrompt,
+            confirmButton = { TextButton(vm::acceptUpdatePrompt) { Text("Update") } },
+            dismissButton = { TextButton(vm::dismissUpdatePrompt) { Text("Not now") } },
+            title = { Text("Update found") },
+            text = { Text("Version ${vm.availableUpdate?.version} is available. Would you like to update?") },
         )
     }
 }
@@ -698,12 +708,24 @@ private fun PageScreen(vm: TranslationViewModel) {
                     label = { Text("Move / Rotate") },
                     enabled = page.blocks.any { it.applied },
                 )
+                Spacer(Modifier.weight(1f))
+                val selectedApplied = page.blocks.getOrNull(vm.selectedBlockIndex)?.applied == true
+                OutlinedButton(
+                    onClick = { vm.adjustBlockFontSize(vm.selectedBlockIndex, -2f) },
+                    enabled = selectedApplied && !vm.placementUpdating,
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                ) { Text("A−", fontSize = 16.sp) }
+                OutlinedButton(
+                    onClick = { vm.adjustBlockFontSize(vm.selectedBlockIndex, 2f) },
+                    enabled = selectedApplied && !vm.placementUpdating,
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                ) { Text("A+", fontSize = 16.sp) }
             }
             Text(
                 if (transformMode == PageTransformMode.RESIZE) {
-                    "Tap applied text. Drag inside to move; drag the left, top, right, or bottom handle to resize."
+                    "Pinch to zoom the page. Tap applied text, then drag to move it, use the edge handles to resize, or A− / A+ for the text size."
                 } else {
-                    "Tap applied text. Drag inside to move; drag the round handle above it to rotate."
+                    "Pinch to zoom the page. Tap applied text. Drag inside to move; drag the round handle above it to rotate."
                 },
                 color = AppColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
@@ -835,6 +857,7 @@ private fun EditorScreen(vm: TranslationViewModel) {
             Selector("Font", block.style.font.label, FontChoice.entries.map { it.label }) { label ->
                 vm.updateFont(FontChoice.entries.first { it.label == label })
             }
+            ValueSlider("Text size", block.style.fontSizeSp, 8f..96f, "sp", vm::updateFontSize)
             Selector("Alignment", block.style.alignment.label, TextAlignmentChoice.entries.map { it.label }) { label ->
                 vm.updateAlignment(TextAlignmentChoice.entries.first { it.label == label })
             }

@@ -74,6 +74,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.untrustedtranslations.android.BuildConfig
 import com.untrustedtranslations.android.R
 import com.untrustedtranslations.android.importer.ImportContract
 import com.untrustedtranslations.android.model.*
@@ -168,7 +169,9 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                 Selector(
                     label = "Primary dialogue recognizer",
                     value = vm.ocrProvider.label,
-                    options = OcrProvider.entries.map { it.label },
+                    options = OcrProvider.entries
+                        .filterNot { BuildConfig.FLAVOR == "foss" && it == OcrProvider.ML_KIT }
+                        .map { it.label },
                 ) { label ->
                     vm.chooseOcrProvider(OcrProvider.entries.first { it.label == label })
                 }
@@ -213,7 +216,9 @@ private fun AiSettingsDialog(vm: TranslationViewModel) {
                 Selector(
                     label = "Primary translator",
                     value = vm.translationProvider.label,
-                    options = TranslationProvider.entries.map { it.label },
+                    options = TranslationProvider.entries
+                        .filterNot { BuildConfig.FLAVOR == "foss" && it == TranslationProvider.ML_KIT }
+                        .map { it.label },
                 ) { label ->
                     vm.chooseTranslationProvider(
                         TranslationProvider.entries.first { it.label == label },

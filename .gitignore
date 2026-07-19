@@ -15,3 +15,6 @@ local.properties
 # OS metadata
 .DS_Store
 Thumbs.db
+keystore/
+release-artifacts/
+release-artifacts/

@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.untrustedtranslations.android.BuildConfig
 import com.untrustedtranslations.android.importer.ComicImporter
 import com.untrustedtranslations.android.model.*
 import com.untrustedtranslations.android.persistence.AiSettings
@@ -39,8 +40,12 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     var showAddTextDialog by mutableStateOf(false); private set
     var manualTextDraft by mutableStateOf(""); private set
     var manualBackgroundArgb by mutableStateOf<Long?>(null); private set
-    var ocrProvider by mutableStateOf(OcrProvider.ML_KIT); private set
-    var translationProvider by mutableStateOf(TranslationProvider.ML_KIT); private set
+    var ocrProvider by mutableStateOf(
+        if (BuildConfig.FLAVOR == "foss") OcrProvider.RAPID_OCR else OcrProvider.ML_KIT,
+    ); private set
+    var translationProvider by mutableStateOf(
+        if (BuildConfig.FLAVOR == "foss") TranslationProvider.LOCAL_AI else TranslationProvider.ML_KIT,
+    ); private set
     val deviceProfile = DeviceTierDetector.profile(application)
     var localTranslationPack by mutableStateOf(
         when (deviceProfile.recommendedTier) {
@@ -126,6 +131,12 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         SecureAiSettings.load(getApplication()).let {
             ocrProvider = it.ocrProvider
             translationProvider = it.translationProvider
+            if (BuildConfig.FLAVOR == "foss") {
+                if (ocrProvider == OcrProvider.ML_KIT) ocrProvider = OcrProvider.RAPID_OCR
+                if (translationProvider == TranslationProvider.ML_KIT) {
+                    translationProvider = TranslationProvider.LOCAL_AI
+                }
+            }
             runCatching { ModelPackId.valueOf(it.localTranslationPackName) }
                 .getOrNull()
                 ?.takeIf { pack -> pack in LocalLlmTranslationEngine.localLlmPacks }
@@ -309,6 +320,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         selectedBlockIndex = 0
         resetHistory()
         screen = AppScreen.PAGE
+        viewModelScope.launch { ProjectStore.pruneStaleRenders(saved.project) }
     }
 
     fun deleteProject(saved: SavedProject) = viewModelScope.launch {

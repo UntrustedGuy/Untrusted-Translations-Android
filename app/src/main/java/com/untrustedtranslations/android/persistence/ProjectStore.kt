@@ -59,6 +59,23 @@ object ProjectStore {
         if (root.path.startsWith(projectsRoot.path + File.separator)) root.deleteRecursively()
     }
 
+    /**
+     * Every text edit renders a fresh `rendered-*.png`; nothing removes the old ones, so a
+     * project grows by one full-page PNG per edit. Safe to run only when undo history is
+     * empty (project open), since undo snapshots may still point at older renders.
+     */
+    suspend fun pruneStaleRenders(project: ComicProject) = withContext(Dispatchers.IO) {
+        val referenced = project.pages.mapNotNull { it.renderedSource.path }.toSet()
+        project.pages
+            .mapNotNull { it.originalSource.path?.let(::File)?.parentFile }
+            .distinct()
+            .forEach { directory ->
+                directory.listFiles().orEmpty().forEach { file ->
+                    if (file.name.startsWith("rendered-") && file.path !in referenced) file.delete()
+                }
+            }
+    }
+
     private fun read(file: File): SavedProject {
         val json = JSONObject(file.readText())
         val pagesJson = json.getJSONArray("pages")

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "app": {
-    "version": "0.7.0-beta.1",
-    "releaseUrl": "https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases/tag/v0.7.0-beta.1"
+    "version": "1.0.0",
+    "releaseUrl": "https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases/tag/v1.0.0"
   },
   "geminiModel": "gemini-3.5-flash",
   "modelFiles": {

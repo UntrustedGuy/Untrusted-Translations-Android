@@ -4,9 +4,9 @@
 
 I built this out of a simple frustration: translating a chapter on a phone meant juggling an OCR app, a translator, an image editor, and a file manager, and losing my place in all four. Untrusted Translations keeps the whole job in one project. Import a volume, go through the dialogue page by page, fix the translation where it needs fixing, and put the finished text back on the artwork.
 
-Fair warning — it's still a beta. OCR will miss weird lettering, translations will sometimes sound off, and automatic cleanup can't understand every speech bubble. That's exactly why the editor exists: the human pass is the point.
+Fair warning — the automatic passes aren't magic. OCR will miss weird lettering, translations will sometimes sound off, and cleanup can't understand every speech bubble. That's exactly why the editor exists: the human pass is the point.
 
-[Download the latest beta](https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases) · [Report a bug](https://github.com/UntrustedGuy/Untrusted-Translations-Android/issues)
+[Download the latest release](https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases) · [Report a bug](https://github.com/UntrustedGuy/Untrusted-Translations-Android/issues)
 
 > Please only translate work you have permission to use, and look over a page before you publish it.
 
@@ -37,9 +37,14 @@ Your original import is never edited in place. Images export as PNG, PDF as PDF,
 
 ## Install
 
-The current build is **0.7.0 Beta 1**. Most physical Android phones want the **ARM64** APK; the x86_64 build is mainly for emulators.
+The current release is **1.0.0**. Most physical Android phones want the **ARM64** APK; the x86_64 build is mainly for emulators.
 
-If you already have the app installed, update over it. Don't uninstall first unless you also want to wipe your projects, settings, and downloaded models.
+Two editions are published per release:
+
+- **Full** — everything, including Google ML Kit for quick baseline OCR and translation.
+- **FOSS** — the same app without the closed-source ML Kit SDK, using the local open-source engines instead. This is the build intended for F-Droid.
+
+If you're coming from a 0.x beta, uninstall it once before installing 1.0.0 — the release is now signed with a permanent key, and Android refuses to update across a key change. From 1.0.0 onward, updates install normally over the top and keep your projects, settings, and downloaded models.
 
 The models aren't hidden inside the APK. Optional OCR and translation packs are downloaded from their credited upstream projects only when you pick them.
 
@@ -112,14 +117,14 @@ Local providers keep OCR and translation on the device. Online providers receive
 
 API keys are encrypted with AES-GCM using a non-exportable Android Keystore key, and you can remove them from settings any time. Originals and working project files stay in app-controlled storage; only an exported copy is written to Downloads.
 
-## Known beta limitations
+## Known limitations
 
 - OCR isn't perfect, especially with handwriting, very stylized fonts, low-resolution scans, or unusual bubble shapes.
 - Dialogue filtering can reject a real line or let an SFX through. Deep scan helps with misses but is intentionally not a "detect everything" mode.
 - Automatic text removal and lettering won't match every original font or painted background.
 - Large local models take a while to load and may be impractical on lower-memory phones.
 - CBR/RAR import isn't supported yet.
-- This is currently a debug-signed prerelease. Keep backups of anything important.
+- Keep backups of anything you'd hate to lose — it's still a young app.
 
 ## Building from source
 
@@ -135,19 +140,19 @@ On Windows, use `.\gradlew.bat :app:assembleDebug`. If you cloned without submod
 
 ## Thanks and credits
 
-Untrusted Translations is written and maintained by me, [UntrustedGuy](https://github.com/UntrustedGuy). That said, it wouldn't exist in its current form without a lot of open work from other people:
+Untrusted Translations is written and maintained by me, [UntrustedGuy](https://github.com/UntrustedGuy). That said, it wouldn't exist in its current form without a lot of open work from other people, most of it shared under the Apache License 2.0 — which asks exactly one thing in return: credit. So, credit where it's due:
 
 - [ImageTrans](https://www.basiccat.org/imagetrans/) and [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) showed what a good computer-assisted comic translation workflow could look like. This project is an original Android implementation, not a port of either codebase.
-- [ogkalu](https://huggingface.co/ogkalu/comic-text-and-bubble-detector) published the RT-DETR-v2 comic text/bubble detector used to separate dialogue from free text.
-- [kha-white](https://github.com/kha-white/manga-ocr) created Manga-OCR; [jzhang533](https://huggingface.co/jzhang533/manga-ocr-base-2025) produced the 2025 fine-tune; and [l0wgear](https://huggingface.co/l0wgear/manga-ocr-2025-onnx) exported the ONNX files used here.
-- [genshiai-daichi](https://huggingface.co/genshiai-daichi/baberu-ocr) created Baberu OCR and credits DINOv2, Manga-OCR, and PaddleOCR-VL as its upstream components/teachers.
-- The [RapidAI team](https://github.com/RapidAI/RapidOCR), [PaddleOCR contributors](https://github.com/PaddlePaddle/PaddleOCR), and [monkt](https://huggingface.co/monkt/paddleocr-onnx) provide the OCR models and ONNX conversions behind the RapidOCR options.
-- [niedev](https://github.com/niedev/RTranslator) published RTranslator's Android-optimized NLLB files. The underlying NLLB-200 model is from Meta's NLLB team and remains non-commercial.
-- The [Qwen team](https://huggingface.co/Qwen) created Qwen3 and Qwen2-VL; [bartowski](https://huggingface.co/bartowski) published the Qwen3 GGUF quantizations; and [ggml-org](https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF) published the Qwen2-VL GGUF model/projector.
-- [llama.cpp](https://github.com/ggml-org/llama.cpp) provides local GGUF inference, [ONNX Runtime](https://github.com/microsoft/onnxruntime) runs the ONNX models, and Android/Kotlin/Jetpack Compose/Google ML Kit provide the platform and lightweight mobile ML pieces.
+- [ogkalu](https://huggingface.co/ogkalu/comic-text-and-bubble-detector) published the RT-DETR-v2 comic text/bubble detector used to separate dialogue from free text (Apache-2.0).
+- [kha-white](https://github.com/kha-white/manga-ocr) created Manga-OCR (Apache-2.0); [jzhang533](https://huggingface.co/jzhang533/manga-ocr-base-2025) produced the 2025 fine-tune; and [l0wgear](https://huggingface.co/l0wgear/manga-ocr-2025-onnx) exported the ONNX files used here.
+- [genshiai-daichi](https://huggingface.co/genshiai-daichi/baberu-ocr) created Baberu OCR (Apache-2.0) and credits DINOv2, Manga-OCR, and PaddleOCR-VL as its upstream components/teachers.
+- The [RapidAI team](https://github.com/RapidAI/RapidOCR) and [PaddleOCR contributors](https://github.com/PaddlePaddle/PaddleOCR) (both Apache-2.0), plus [monkt](https://huggingface.co/monkt/paddleocr-onnx)'s ONNX conversions, are behind the RapidOCR options.
+- [niedev](https://github.com/niedev/RTranslator) published RTranslator's Android-optimized NLLB files (RTranslator code is Apache-2.0). The underlying NLLB-200 model is from Meta's NLLB team and remains non-commercial.
+- The [Qwen team](https://huggingface.co/Qwen) at Alibaba Cloud created Qwen3 and Qwen2-VL (Apache-2.0); [bartowski](https://huggingface.co/bartowski) published the Qwen3 GGUF quantizations; and [ggml-org](https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF) published the Qwen2-VL GGUF model/projector.
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT) provides local GGUF inference, [ONNX Runtime](https://github.com/microsoft/onnxruntime) (MIT) runs the ONNX models, and Android/Kotlin/Jetpack Compose (Apache-2.0)/Google ML Kit provide the platform and lightweight mobile ML pieces.
 - [Comic Neue](https://github.com/crozynski/comicneue), by the Comic Neue project authors, is the bundled lettering font under the SIL Open Font License 1.1.
 
-For exact licenses, model restrictions, upstream links, and service terms, read [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Bundled texts include the [llama.cpp MIT license](third_party/llama.cpp/LICENSE), [Comic Neue OFL-1.1](app/src/main/assets/fonts/OFL-ComicNeue.txt), and the [Apache License 2.0](RTRANSLATOR_LICENSE.txt).
+For exact licenses, copyright holders, model restrictions, upstream links, and service terms, read [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Bundled texts include the [llama.cpp MIT license](third_party/llama.cpp/LICENSE), [Comic Neue OFL-1.1](app/src/main/assets/fonts/OFL-ComicNeue.txt), and the full [Apache License 2.0](RTRANSLATOR_LICENSE.txt).
 
 ## License
 

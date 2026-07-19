@@ -8,7 +8,7 @@ Fair warning — the automatic passes aren't magic. OCR will miss weird letterin
 
 [Download the latest release](https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases) · [Report a bug](https://github.com/UntrustedGuy/Untrusted-Translations-Android/issues)
 
-> Please only translate work you have permission to use, and look over a page before you publish it.
+> You are responsible for everything you translate — and look over a page before you publish it.
 
 ## A look at the app
 

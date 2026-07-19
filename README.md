@@ -50,7 +50,7 @@ The current release is **1.0.0**. Most physical Android phones want the **ARM64*
 Two editions are published per release:
 
 - **Full** — everything, including Google ML Kit for quick baseline OCR and translation.
-- **FOSS** — the same app without the closed-source ML Kit SDK, using the local open-source engines instead. This is the build intended for F-Droid.
+- **FOSS** — the same app without the closed-source ML Kit SDK, using the local open-source engines instead. Pick this one if you want a fully Google-free build (F-Droid style) — it's right on the Releases page.
 
 If you're coming from a 0.x beta, uninstall it once before installing 1.0.0 — the release is now signed with a permanent key, and Android refuses to update across a key change. From 1.0.0 onward, updates install normally over the top and keep your projects, settings, and downloaded models.
 

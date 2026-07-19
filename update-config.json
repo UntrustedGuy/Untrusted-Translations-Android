@@ -5,5 +5,26 @@
     "releaseUrl": "https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases/tag/v0.7.0-beta.1"
   },
   "geminiModel": "gemini-3.5-flash",
-  "modelFiles": {}
+  "modelFiles": {
+    "COMIC_DIALOGUE_DETECTOR/comic_dialogue_detector.onnx": {
+      "url": "https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases/download/model-assets-v1/detector-v4-s_int8.onnx",
+      "sha256": "5fe9e4f576e49d4e7e8b0e029d6d3cdc252abd4694113e1cae120e62c931ea79"
+    },
+    "LOCAL_LLM_LOW/model.gguf": {
+      "url": "https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases/download/model-assets-v1/Qwen_Qwen3-0.6B-Q4_K_M.gguf",
+      "sha256": "9acfc1e001311f34b4252001b626f2e466d592a42065f66571bff3790d4e1b14"
+    },
+    "LOCAL_LLM_MID/model.gguf": {
+      "url": "https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases/download/model-assets-v1/Qwen_Qwen3-1.7B-Q4_K_M.gguf",
+      "sha256": "72c5c3cb38fa32d5256e2fe30d03e7a64c6c79e668ad84057e3bd66e250b24fb"
+    },
+    "VLM_OCR_HIGH/model.gguf": {
+      "url": "https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases/download/model-assets-v1/Qwen2-VL-2B-Instruct-Q4_K_M.gguf",
+      "sha256": "5745685d2e607a82a0696c1118e56a2a1ae0901da450fd9cd4f161c6b62867d7"
+    },
+    "VLM_OCR_HIGH/mmproj.gguf": {
+      "url": "https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases/download/model-assets-v1/mmproj-Qwen2-VL-2B-Instruct-Q8_0.gguf",
+      "sha256": "a0ad91f00a7a80dcf84d719a61b00ee2e07b71794f4ee2dfa81a254621a8c418"
+    }
+  }
 }

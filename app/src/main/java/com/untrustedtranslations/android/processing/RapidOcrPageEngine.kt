@@ -10,9 +10,15 @@ import android.graphics.Matrix
 import android.graphics.Rect
 import com.untrustedtranslations.android.model.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.nio.FloatBuffer
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -21,6 +27,48 @@ import kotlin.math.roundToInt
 internal object RapidOcrPageEngine {
     private data class Detection(val rect: Rect, val score: Float)
     private data class Reading(val text: String, val score: Float)
+
+    private val keysCache = ConcurrentHashMap<String, List<String>>()
+
+    private fun keysFor(pack: ModelPackId, dir: java.io.File): List<String> =
+        keysCache.getOrPut(pack.name) {
+            listOf("#") + java.io.File(dir, "keys.txt").readLines() + " "
+        }
+
+    /**
+     * Recognizes a crop, running the angle classifier first, and only trying rotated
+     * variants for tall crops when the upright reading is not already confident.
+     */
+    private fun readBest(
+        env: OrtEnvironment,
+        recognizer: OrtSession,
+        classifier: OrtSession?,
+        crop: Bitmap,
+        keys: List<String>,
+    ): Reading {
+        fun readUpright(candidate: Bitmap): Reading {
+            val upright = if (classifier != null && shouldFlip(env, classifier, candidate)) {
+                rotate(candidate, 180f)
+            } else candidate
+            return try {
+                recognize(env, recognizer, upright, keys)
+            } finally {
+                if (upright !== candidate) upright.recycle()
+            }
+        }
+
+        val base = readUpright(crop)
+        if (crop.height <= crop.width * 1.35f || base.score >= .8f) return base
+        val rotated = floatArrayOf(90f, -90f).map { degrees ->
+            val candidate = rotate(crop, degrees)
+            try {
+                readUpright(candidate)
+            } finally {
+                candidate.recycle()
+            }
+        }
+        return (rotated + base).maxBy { it.score }
+    }
 
     suspend fun process(
         context: Context,
@@ -39,55 +87,48 @@ internal object RapidOcrPageEngine {
         val classifier = if (classifierFile.isFile) {
             OnnxSessionCache.getOrCreate("${pack.name}_cls", classifierFile)
         } else null
-        val keys = listOf("#") + java.io.File(dir, "keys.txt").readLines() + " "
-        val blocks = detect(environment, detector, bitmap).mapNotNull { detection ->
-            val crop = Bitmap.createBitmap(
-                bitmap,
-                detection.rect.left,
-                detection.rect.top,
-                detection.rect.width(),
-                detection.rect.height(),
-            )
-            val candidates = mutableListOf(crop)
-            if (detection.rect.height() > detection.rect.width() * 1.35f) {
-                candidates += rotate(crop, 90f)
-                candidates += rotate(crop, -90f)
-            }
-            val readings = try {
-                candidates.map { candidate ->
-                    val upright = if (classifier != null && shouldFlip(environment, classifier, candidate)) {
-                        rotate(candidate, 180f)
-                    } else candidate
-                    try {
-                        recognize(environment, recognizer, upright, keys)
-                    } finally {
-                        if (upright !== candidate) upright.recycle()
+        val keys = keysFor(pack, dir)
+        val detections = detect(environment, detector, bitmap)
+        // ORT session.run is thread-safe; two crops in flight keeps the cores busy without
+        // oversubscribing the intra-op thread pool.
+        val parallelism = Semaphore(2)
+        val blocks = coroutineScope {
+            detections.map { detection ->
+                async {
+                    parallelism.withPermit {
+                        val crop = Bitmap.createBitmap(
+                            bitmap,
+                            detection.rect.left,
+                            detection.rect.top,
+                            detection.rect.width(),
+                            detection.rect.height(),
+                        )
+                        val reading = try {
+                            readBest(environment, recognizer, classifier, crop, keys)
+                        } finally {
+                            crop.recycle()
+                        }
+                        val text = reading.text.trim()
+                        if (reading.score < .38f || text.isBlank()) return@withPermit null
+                        val bounds = RelativeBounds(
+                            detection.rect.left.toFloat() / bitmap.width,
+                            detection.rect.top.toFloat() / bitmap.height,
+                            detection.rect.right.toFloat() / bitmap.width,
+                            detection.rect.bottom.toFloat() / bitmap.height,
+                        )
+                        TextBlock(
+                            id = UUID.randomUUID().toString(),
+                            originalText = text,
+                            translatedText = text,
+                            bounds = bounds,
+                            eraseBounds = bounds,
+                            style = LetteringStyleEstimator.estimate(
+                                context, bitmap, detection.rect, text, script, null,
+                            ),
+                        )
                     }
                 }
-            } finally {
-                candidates.forEach { it.recycle() }
-            }
-            val reading = readings.maxByOrNull { it.score } ?: return@mapNotNull null
-            val text = reading.text.trim()
-            if (reading.score < .38f || text.isBlank()) {
-                return@mapNotNull null
-            }
-            val bounds = RelativeBounds(
-                detection.rect.left.toFloat() / bitmap.width,
-                detection.rect.top.toFloat() / bitmap.height,
-                detection.rect.right.toFloat() / bitmap.width,
-                detection.rect.bottom.toFloat() / bitmap.height,
-            )
-            TextBlock(
-                id = UUID.randomUUID().toString(),
-                originalText = text,
-                translatedText = text,
-                bounds = bounds,
-                eraseBounds = bounds,
-                style = LetteringStyleEstimator.estimate(
-                    context, bitmap, detection.rect, text, script, null,
-                ),
-            )
+            }.awaitAll().filterNotNull()
         }
         bitmap.recycle()
         BlockGrouping.filterDialogue(BlockGrouping.groupIntoBubbles(blocks, script))
@@ -107,27 +148,9 @@ internal object RapidOcrPageEngine {
         val classifier = classifierFile.takeIf { it.isFile }?.let {
             OnnxSessionCache.getOrCreate("${pack.name}_cls", it)
         }
-        val keys = listOf("#") + java.io.File(directory, "keys.txt").readLines() + " "
-        val candidates = mutableListOf(bitmap)
-        if (bitmap.height > bitmap.width * 1.35f) {
-            candidates += rotate(bitmap, 90f)
-            candidates += rotate(bitmap, -90f)
-        }
-        return try {
-            candidates.map { candidate ->
-                val upright = if (classifier != null && shouldFlip(environment, classifier, candidate)) {
-                    rotate(candidate, 180f)
-                } else candidate
-                try {
-                    recognize(environment, recognizer, upright, keys)
-                } finally {
-                    if (upright !== candidate) upright.recycle()
-                }
-            }.maxByOrNull { it.score }?.let { CropReading(it.text.trim(), it.score) }
-                ?: CropReading("", 0f)
-        } finally {
-            candidates.filter { it !== bitmap }.forEach(Bitmap::recycle)
-        }
+        val keys = keysFor(pack, directory)
+        val reading = readBest(environment, recognizer, classifier, bitmap, keys)
+        return CropReading(reading.text.trim(), reading.score)
     }
     private fun shouldFlip(env: OrtEnvironment, session: OrtSession, bitmap: Bitmap): Boolean {
         val resized = Bitmap.createScaledBitmap(bitmap, 192, 48, true)
@@ -282,13 +305,16 @@ internal object RapidOcrPageEngine {
         val pixels = IntArray(bitmap.width * bitmap.height)
         bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
         val plane = pixels.size
-        return FloatArray(plane * 3).also { output ->
-            pixels.forEachIndexed { index, color ->
-                val channels = intArrayOf(color shr 16 and 255, color shr 8 and 255, color and 255)
-                for (channel in 0..2) output[channel * plane + index] =
-                    (channels[channel] - means[channel]) * norms[channel]
-            }
+        val output = FloatArray(plane * 3)
+        val mean0 = means[0]; val mean1 = means[1]; val mean2 = means[2]
+        val norm0 = norms[0]; val norm1 = norms[1]; val norm2 = norms[2]
+        for (index in pixels.indices) {
+            val color = pixels[index]
+            output[index] = ((color shr 16 and 255) - mean0) * norm0
+            output[plane + index] = ((color shr 8 and 255) - mean1) * norm1
+            output[plane * 2 + index] = ((color and 255) - mean2) * norm2
         }
+        return output
     }
 
     private fun rotate(bitmap: Bitmap, degrees: Float): Bitmap =

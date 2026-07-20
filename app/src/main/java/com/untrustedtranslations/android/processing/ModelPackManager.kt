@@ -59,6 +59,8 @@ object ModelPackManager {
     private const val BABERU_BASE = "https://huggingface.co/genshiai-daichi/baberu-ocr/resolve/main"
     private const val MANGA_OCR_BASE =
         "https://huggingface.co/l0wgear/manga-ocr-2025-onnx/resolve/e8b27bbd3f424fe3877e0bda704d6a920e4f0a33"
+    private const val ASSETS_BASE =
+        "https://github.com/UntrustedGuy/Untrusted-Translations-Android/releases/download/model-assets-v1"
     private const val COMIC_DETECTOR_BASE =
         "https://huggingface.co/ogkalu/comic-text-and-bubble-detector/resolve/16e8a622f91fabc6b5b65c96d32d1183f8843546"
     private const val HF_BASE =
@@ -138,8 +140,8 @@ object ModelPackManager {
         ModelPackInfo(
             ModelPackId.MANGA_OCR_JAPANESE,
             "Manga-OCR Japanese",
-            "Japanese Manga-OCR recognizer. Uses the separately downloaded shared comic dialogue detector.",
-            140, 4, "Apache-2.0 Manga-OCR. May be slow on older devices.",
+            "Japanese Manga-OCR recognizer (int8, ~2x faster). Uses the separately downloaded shared comic dialogue detector.",
+            36, 3, "Apache-2.0 Manga-OCR. May be slow on older devices.",
         ),
         ModelPackInfo(
             ModelPackId.NLLB_TRANSLATION,
@@ -364,14 +366,14 @@ object ModelPackManager {
         )
         ModelPackId.MANGA_OCR_JAPANESE -> listOf(
             PackFile(
-                "encoder_model.onnx",
-                "$MANGA_OCR_BASE/encoder_model.onnx",
-                "f87668ae0f62d6f032dac6b213e8c0fea84cd15895ac8cab624cc9a2f49d4a27",
+                "encoder_model_int8.onnx",
+                "$ASSETS_BASE/manga-ocr-2025-encoder-int8.onnx",
+                "51ecce0762d4d27809f6866392729bcb74935bdd3c315f2f8f7c207654f7aac4",
             ),
             PackFile(
-                "decoder_model.onnx",
-                "$MANGA_OCR_BASE/decoder_model.onnx",
-                "6b1fb216d542c4b2a4fa5b9d7ae3522081eb85fb959d2cecd28055af956a8a5e",
+                "decoder_model_int8.onnx",
+                "$ASSETS_BASE/manga-ocr-2025-decoder-int8.onnx",
+                "acf45255addfe6c64840ab331de34d14c102ae990ac72ca6891831dfcd0b00bb",
             ),
             PackFile("config.json", "$MANGA_OCR_BASE/config.json", "cb53957d90b8469961b3a64f9b2ebe472d803bf1308e3505b51916aa4341c547"),
             PackFile("generation_config.json", "$MANGA_OCR_BASE/generation_config.json", "394166c379c675a6b044ee391bfdf7acbb58b7de68541e66e50607cf56576979"),

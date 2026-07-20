@@ -11,11 +11,17 @@ import com.untrustedtranslations.android.model.RelativeBounds
 import com.untrustedtranslations.android.model.SourceScript
 import com.untrustedtranslations.android.model.TextBlock
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 import java.text.Normalizer
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.exp
 
 internal object MangaOcrPageEngine {
@@ -24,6 +30,15 @@ internal object MangaOcrPageEngine {
     private const val MAX_TOKENS = 160
 
     private data class Reading(val text: String, val confidence: Float)
+
+    private val vocabularyCache = AtomicReference<Pair<String, List<String>>?>(null)
+
+    private fun vocabularyFor(file: java.io.File): List<String> {
+        vocabularyCache.get()?.let { (path, lines) -> if (path == file.absolutePath) return lines }
+        val lines = file.readLines(Charsets.UTF_8)
+        vocabularyCache.set(file.absolutePath to lines)
+        return lines
+    }
 
     suspend fun process(
         context: Context,
@@ -51,50 +66,59 @@ internal object MangaOcrPageEngine {
             val environment = OnnxSessionCache.environment
             val encoder = OnnxSessionCache.getOrCreate(
                 "${recognitionPack.name}_encoder",
-                java.io.File(directory, "encoder_model.onnx"),
+                java.io.File(directory, "encoder_model_int8.onnx"),
             )
             val decoder = OnnxSessionCache.getOrCreate(
                 "${recognitionPack.name}_decoder",
-                java.io.File(directory, "decoder_model.onnx"),
+                java.io.File(directory, "decoder_model_int8.onnx"),
             )
             validateModelContract(encoder, decoder)
-            val vocabulary = java.io.File(directory, "vocab.txt").readLines(Charsets.UTF_8)
-            val blocks = regions.mapNotNull { region ->
-                val recognitionRect = paddedCrop(region.rect, bitmap.width, bitmap.height)
-                val crop = Bitmap.createBitmap(
-                    bitmap,
-                    recognitionRect.left,
-                    recognitionRect.top,
-                    recognitionRect.width(),
-                    recognitionRect.height(),
-                )
-                val reading = try {
-                    recognize(environment, encoder, decoder, crop, vocabulary)
-                } finally {
-                    crop.recycle()
-                }
-                if (reading.text.isBlank() || reading.confidence < .18f) return@mapNotNull null
-                val bounds = RelativeBounds(
-                    region.rect.left / bitmap.width.toFloat(),
-                    region.rect.top / bitmap.height.toFloat(),
-                    region.rect.right / bitmap.width.toFloat(),
-                    region.rect.bottom / bitmap.height.toFloat(),
-                )
-                TextBlock(
-                    id = UUID.randomUUID().toString(),
-                    originalText = reading.text,
-                    translatedText = reading.text,
-                    bounds = bounds,
-                    eraseBounds = bounds,
-                    style = LetteringStyleEstimator.estimate(
-                        context,
-                        bitmap,
-                        region.rect,
-                        reading.text,
-                        script,
-                        null,
-                    ),
-                )
+            val vocabulary = vocabularyFor(java.io.File(directory, "vocab.txt"))
+            // Autoregressive decoding is the bottleneck; two crops in flight overlaps the
+            // encoder of one bubble with the decoder loop of another.
+            val parallelism = Semaphore(2)
+            val blocks = coroutineScope {
+                regions.map { region ->
+                    async {
+                        parallelism.withPermit {
+                            val recognitionRect = paddedCrop(region.rect, bitmap.width, bitmap.height)
+                            val crop = Bitmap.createBitmap(
+                                bitmap,
+                                recognitionRect.left,
+                                recognitionRect.top,
+                                recognitionRect.width(),
+                                recognitionRect.height(),
+                            )
+                            val reading = try {
+                                recognize(environment, encoder, decoder, crop, vocabulary)
+                            } finally {
+                                crop.recycle()
+                            }
+                            if (reading.text.isBlank() || reading.confidence < .18f) return@withPermit null
+                            val bounds = RelativeBounds(
+                                region.rect.left / bitmap.width.toFloat(),
+                                region.rect.top / bitmap.height.toFloat(),
+                                region.rect.right / bitmap.width.toFloat(),
+                                region.rect.bottom / bitmap.height.toFloat(),
+                            )
+                            TextBlock(
+                                id = UUID.randomUUID().toString(),
+                                originalText = reading.text,
+                                translatedText = reading.text,
+                                bounds = bounds,
+                                eraseBounds = bounds,
+                                style = LetteringStyleEstimator.estimate(
+                                    context,
+                                    bitmap,
+                                    region.rect,
+                                    reading.text,
+                                    script,
+                                    null,
+                                ),
+                            )
+                        }
+                    }
+                }.awaitAll().filterNotNull()
             }
             // Each region is already one speech-bubble text block. Grouping here could merge
             // adjacent bubbles and heuristic filtering could discard legitimate one-character replies.

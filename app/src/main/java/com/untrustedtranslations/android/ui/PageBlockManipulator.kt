@@ -114,12 +114,6 @@ fun ManipulablePagePreview(
     var sourceBounds by remember(page.id, selected?.id) {
         mutableStateOf(selected?.bounds ?: RelativeBounds(.25f, .4f, .75f, .6f))
     }
-    var sourceFontSizeSp by remember(page.id, selected?.id) {
-        mutableStateOf(selected?.style?.fontSizeSp ?: 22f)
-    }
-    var sourceRotation by remember(page.id, selected?.id) {
-        mutableStateOf(selected?.style?.rotationDegrees ?: 0f)
-    }
     var dragHandle by remember { mutableStateOf(PageDragHandle.NONE) }
     val shape = RoundedCornerShape(18.dp)
 
@@ -179,8 +173,6 @@ fun ManipulablePagePreview(
                                             draftBounds = block.bounds
                                             draftRotation = block.style.rotationDegrees
                                             sourceBounds = block.bounds
-                                            sourceFontSizeSp = block.style.fontSizeSp
-                                            sourceRotation = block.style.rotationDegrees
                                             previewPending = true
                                         }
                                     }
@@ -285,8 +277,6 @@ fun ManipulablePagePreview(
                                     draftBounds = activeBlock.bounds
                                     draftRotation = activeBlock.style.rotationDegrees
                                     sourceBounds = activeBlock.bounds
-                                    sourceFontSizeSp = activeBlock.style.fontSizeSp
-                                    sourceRotation = activeBlock.style.rotationDegrees
                                     previewPending = true
                                     dragHandle = currentHandle
                                 } else {
@@ -300,8 +290,6 @@ fun ManipulablePagePreview(
                                         draftBounds = block.bounds
                                         draftRotation = block.style.rotationDegrees
                                         sourceBounds = block.bounds
-                                        sourceFontSizeSp = block.style.fontSizeSp
-                                        sourceRotation = block.style.rotationDegrees
                                         previewPending = true
                                         onSelectBlock(hit)
                                         dragHandle = PageDragHandle.MOVE
@@ -363,62 +351,56 @@ fun ManipulablePagePreview(
                 if (previewPending && liveBlock?.applied == true && viewport != IntSize.Zero) {
                     val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
                     val oldRect = sourceBounds.toPageRect(geometry)
-                    val liveRect = draftBounds.toPageRect(geometry)
                     val density = LocalDensity.current
-                    val liveWidth = with(density) { liveRect.width.toDp() }
-                    val liveHeight = with(density) { liveRect.height.toDp() }
-                    val sourceHeight = (sourceBounds.bottom - sourceBounds.top).coerceAtLeast(.001f)
-                    val draftHeight = (draftBounds.bottom - draftBounds.top).coerceAtLeast(.001f)
-                    val requestedFontSize = (sourceFontSizeSp * draftHeight / sourceHeight).coerceIn(8f, 160f)
-                    val draftWidth = draftBounds.right - draftBounds.left
-                    // Quantized keys: re-fitting text is a StaticLayout loop, far too heavy to
-                    // run on every gesture frame. Between recomputes the last fitted size is
-                    // scaled linearly with the box, which is visually indistinguishable.
-                    val draftPixelWidth = ((draftWidth * bmp.width) / 24f).roundToInt() * 24
-                    val draftPixelHeight = ((draftHeight * bmp.height) / 24f).roundToInt() * 24
-                    val requestedFontStep = (requestedFontSize / 2f).roundToInt()
-                    val fittedInfo = remember(
+                    // Fit text once at the gesture's source geometry; every frame after that is a
+                    // pure graphicsLayer transform (scale/translate/rotate) — no re-layout, so the
+                    // text grows and moves with the box at full frame rate. The exact re-fit
+                    // happens on commit when the page re-renders.
+                    val fittedSourceSp = remember(
                         liveBlock.id,
                         liveBlock.translatedText,
                         liveBlock.style,
-                        draftPixelWidth,
-                        draftPixelHeight,
-                        requestedFontStep,
+                        sourceBounds,
                     ) {
                         PageRenderer.fittedFontSizeSp(
                             context,
                             bmp.width,
                             bmp.height,
-                            liveBlock.copy(
-                                bounds = draftBounds,
-                                style = liveBlock.style.copy(fontSizeSp = requestedFontSize),
-                            ),
-                        ) to requestedFontSize
-                    }
-                    val displayScale = geometry.width / bmp.width.coerceAtLeast(1)
-                    val liveFontSizeSp = fittedInfo.first *
-                        (requestedFontSize / fittedInfo.second.coerceAtLeast(.01f)) * displayScale
-                    if (oldRect != liveRect || draftRotation != sourceRotation) {
-                        Box(
-                            Modifier
-                                .offset {
-                                    IntOffset(oldRect.left.roundToInt(), oldRect.top.roundToInt())
-                                }
-                                .size(
-                                    with(density) { oldRect.width.toDp() },
-                                    with(density) { oldRect.height.toDp() },
-                                )
-                                .background(Color(0xB3FFFFFF)),
+                            liveBlock.copy(bounds = sourceBounds),
                         )
                     }
+                    val displayScale = geometry.width / bmp.width.coerceAtLeast(1)
+                    val liveFontSizeSp = fittedSourceSp * displayScale
+                    Box(
+                        Modifier
+                            .offset {
+                                IntOffset(oldRect.left.roundToInt(), oldRect.top.roundToInt())
+                            }
+                            .size(
+                                with(density) { oldRect.width.toDp() },
+                                with(density) { oldRect.height.toDp() },
+                            )
+                            .background(Color(0xB3FFFFFF)),
+                    )
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .offset {
-                                IntOffset(liveRect.left.roundToInt(), liveRect.top.roundToInt())
+                                IntOffset(oldRect.left.roundToInt(), oldRect.top.roundToInt())
                             }
-                            .size(liveWidth, liveHeight)
-                            .graphicsLayer { rotationZ = draftRotation }
+                            .size(
+                                with(density) { oldRect.width.toDp() },
+                                with(density) { oldRect.height.toDp() },
+                            )
+                            .graphicsLayer {
+                                val live = draftBounds.toPageRect(geometry)
+                                transformOrigin = TransformOrigin(.5f, .5f)
+                                scaleX = live.width / oldRect.width.coerceAtLeast(1f)
+                                scaleY = live.height / oldRect.height.coerceAtLeast(1f)
+                                translationX = live.center.x - oldRect.center.x
+                                translationY = live.center.y - oldRect.center.y
+                                rotationZ = draftRotation
+                            }
                             .background(
                                 liveBlock.style.backgroundColorArgb?.let { Color(it.toInt()) }
                                     ?: Color(0xB3FFFFFF),
@@ -434,7 +416,7 @@ fun ManipulablePagePreview(
                                 liveBlock.translatedText
                             },
                             color = Color(liveBlock.style.textColorArgb.toInt()),
-                            fontSize = liveFontSizeSp.coerceIn(4f, 160f).sp,
+                            fontSize = liveFontSizeSp.coerceIn(.5f, 160f).sp,
                             fontFamily = when (liveBlock.style.font) {
                                 FontChoice.AUTO, FontChoice.SANS -> FontFamily.Default
                                 FontChoice.SERIF -> FontFamily.Serif
@@ -450,7 +432,11 @@ fun ManipulablePagePreview(
                                 com.untrustedtranslations.android.model.TextAlignmentChoice.CENTER -> TextAlign.Center
                                 com.untrustedtranslations.android.model.TextAlignmentChoice.END -> TextAlign.End
                             },
-                            modifier = Modifier.fillMaxWidth().padding(4.dp),
+                            modifier = Modifier.fillMaxWidth().padding(
+                                // Renderer pads by 6% of box width; mirror it so line wrapping
+                                // matches the committed bitmap even for tiny boxes.
+                                with(density) { (oldRect.width * .06f).toDp() },
+                            ),
                         )
                     }
                 }

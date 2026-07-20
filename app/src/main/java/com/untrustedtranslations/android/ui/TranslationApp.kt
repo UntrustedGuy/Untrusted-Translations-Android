@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -64,12 +66,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -742,12 +747,12 @@ private fun PageScreen(vm: TranslationViewModel) {
                         valueRange = 25f..400f,
                         modifier = Modifier.weight(1f),
                     )
-                    Text(
-                        "${sliderPercent.roundToInt()}%",
-                        color = AppColors.Cyan,
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.width(52.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    TextSizeField(
+                        percent = sliderPercent,
+                        onCommit = { typed ->
+                            sliderPercent = typed
+                            vm.setBlockFontSize(vm.selectedBlockIndex, BASE_TEXT_SIZE_SP * typed / 100f)
+                        },
                     )
                 }
             }
@@ -888,11 +893,22 @@ private fun EditorScreen(vm: TranslationViewModel) {
                 vm.updateFont(FontChoice.entries.first { it.label == label })
             }
             Text("Text size: ${(block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).roundToInt()}%")
-            Slider(
-                value = (block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).coerceIn(25f, 400f),
-                onValueChange = { vm.updateFontSize(BASE_TEXT_SIZE_SP * it / 100f) },
-                valueRange = 25f..400f,
-            )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Slider(
+                    value = (block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).coerceIn(25f, 400f),
+                    onValueChange = { vm.updateFontSize(BASE_TEXT_SIZE_SP * it / 100f) },
+                    valueRange = 25f..400f,
+                    modifier = Modifier.weight(1f),
+                )
+                TextSizeField(
+                    percent = (block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).coerceIn(25f, 400f),
+                    onCommit = { vm.updateFontSize(BASE_TEXT_SIZE_SP * it / 100f) },
+                )
+            }
             Selector("Alignment", block.style.alignment.label, TextAlignmentChoice.entries.map { it.label }) { label ->
                 vm.updateAlignment(TextAlignmentChoice.entries.first { it.label == label })
             }
@@ -948,6 +964,36 @@ private fun EditorScreen(vm: TranslationViewModel) {
             Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+@Composable
+private fun TextSizeField(
+    percent: Float,
+    onCommit: (Float) -> Unit,
+) {
+    var text by remember(percent.roundToInt()) { mutableStateOf(percent.roundToInt().toString()) }
+    val commit = {
+        text.toFloatOrNull()?.let { typed -> onCommit(typed.coerceIn(25f, 400f)) }
+        Unit
+    }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { input -> text = input.filter { it.isDigit() }.take(3) },
+        modifier = Modifier
+            .width(84.dp)
+            .onFocusChanged { if (!it.isFocused) commit() },
+        textStyle = MaterialTheme.typography.labelLarge.copy(
+            color = AppColors.Cyan,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+        ),
+        suffix = { Text("%", color = AppColors.Muted) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Number,
+            imeAction = ImeAction.Done,
+        ),
+        keyboardActions = KeyboardActions(onDone = { commit() }),
+    )
 }
 
 @Composable

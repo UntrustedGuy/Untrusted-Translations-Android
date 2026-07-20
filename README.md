@@ -102,7 +102,7 @@ One recognizer is active at a time. Installing three models doesn't make the app
 - **Google Translate (unofficial)** — experimental no-key endpoint that may get rate-limited or disappear.
 - **OpenAI, Claude, or a custom OpenAI-compatible endpoint** — bring-your-own-key services. Provider billing and terms apply.
 
-A ChatGPT or Claude website subscription can't be reused as API credit. The app never ships a shared developer key and never switches you to a paid service without your configuration.
+The app never ships a shared developer key and never switches you to a paid service without your configuration.
 
 ## Local model sizes
 

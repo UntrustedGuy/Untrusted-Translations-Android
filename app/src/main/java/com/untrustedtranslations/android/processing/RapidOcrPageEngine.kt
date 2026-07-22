@@ -91,7 +91,7 @@ internal object RapidOcrPageEngine {
         val detections = detect(environment, detector, bitmap)
         // ORT session.run is thread-safe; two crops in flight keeps the cores busy without
         // oversubscribing the intra-op thread pool.
-        val parallelism = Semaphore(2)
+        val parallelism = Semaphore(4)
         val blocks = coroutineScope {
             detections.map { detection ->
                 async {
@@ -175,7 +175,7 @@ internal object RapidOcrPageEngine {
     }
 
     private fun detect(env: OrtEnvironment, session: OrtSession, bitmap: Bitmap): List<Detection> {
-        val maxSide = 1280f
+        val maxSide = 960f
         val scale = min(1f, maxSide / max(bitmap.width, bitmap.height))
         val width = ceil(bitmap.width * scale / 32f).toInt().coerceAtLeast(32) * 32
         val height = ceil(bitmap.height * scale / 32f).toInt().coerceAtLeast(32) * 32

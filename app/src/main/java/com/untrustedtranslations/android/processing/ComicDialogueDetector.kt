@@ -14,12 +14,20 @@ internal object ComicDialogueDetector {
 
     data class Region(val rect: Rect, val confidence: Float)
 
+    private data class CachedResult(val width: Int, val height: Int, val minScore: Float, val regions: List<Region>)
+    private var lastResult: CachedResult? = null
+
     fun detect(
         cacheKey: String,
         model: File,
         bitmap: Bitmap,
         minimumScore: Float = .35f,
     ): List<Region> {
+        lastResult?.let { cached ->
+            if (cached.width == bitmap.width && cached.height == bitmap.height && cached.minScore == minimumScore) {
+                return cached.regions
+            }
+        }
         val environment = OnnxSessionCache.environment
         val session = OnnxSessionCache.getOrCreate(cacheKey, model)
         require("images" in session.inputNames && "orig_target_sizes" in session.inputNames) {
@@ -52,7 +60,7 @@ internal object ComicDialogueDetector {
                         @Suppress("UNCHECKED_CAST")
                         val scores = (result.get("scores").orElse(result[2]) as OnnxTensor).value
                             as Array<FloatArray>
-                        return labels[0].indices.mapNotNull { index ->
+                        val regions = labels[0].indices.mapNotNull { index ->
                             if (labels[0][index] != TEXT_BUBBLE_LABEL || scores[0][index] < minimumScore) {
                                 return@mapNotNull null
                             }
@@ -64,6 +72,8 @@ internal object ComicDialogueDetector {
                             if (right - left < 3 || bottom - top < 3) null
                             else Region(Rect(left, top, right, bottom), scores[0][index])
                         }.suppressOverlaps()
+                        lastResult = CachedResult(bitmap.width, bitmap.height, minimumScore, regions)
+                        return regions
                     }
                 }
             }

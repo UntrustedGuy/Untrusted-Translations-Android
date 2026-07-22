@@ -14,7 +14,7 @@ internal object OnnxSessionCache {
     fun getOrCreate(key: String, model: File): OrtSession =
         sessions.getOrPut(key) {
             val accelerated = OrtSession.SessionOptions().apply {
-                setIntraOpNumThreads(minOf(4, Runtime.getRuntime().availableProcessors()))
+                setIntraOpNumThreads(minOf(2, Runtime.getRuntime().availableProcessors()))
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                 runCatching { addXnnpack(mapOf("intra_op_num_threads" to "2")) }
             }
@@ -22,7 +22,7 @@ internal object OnnxSessionCache {
                 environment.createSession(model.absolutePath, accelerated)
             } catch (acceleratedFailure: Exception) {
                 val cpuOnly = OrtSession.SessionOptions().apply {
-                    setIntraOpNumThreads(minOf(4, Runtime.getRuntime().availableProcessors()))
+                    setIntraOpNumThreads(minOf(2, Runtime.getRuntime().availableProcessors()))
                     setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                 }
                 try {

@@ -27,7 +27,7 @@ import kotlin.math.exp
 internal object MangaOcrPageEngine {
     private const val START_TOKEN = 2L
     private const val END_TOKEN = 3L
-    private const val MAX_TOKENS = 160
+    private const val MAX_TOKENS = 80
 
     private data class Reading(val text: String, val confidence: Float)
 
@@ -76,7 +76,7 @@ internal object MangaOcrPageEngine {
             val vocabulary = vocabularyFor(java.io.File(directory, "vocab.txt"))
             // Autoregressive decoding is the bottleneck; two crops in flight overlaps the
             // encoder of one bubble with the decoder loop of another.
-            val parallelism = Semaphore(2)
+            val parallelism = Semaphore(4)
             val blocks = coroutineScope {
                 regions.map { region ->
                     async {

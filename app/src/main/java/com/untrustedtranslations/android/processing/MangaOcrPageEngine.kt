@@ -66,7 +66,7 @@ internal object MangaOcrPageEngine {
             val environment = OnnxSessionCache.environment
             val encoder = OnnxSessionCache.getOrCreate(
                 "${recognitionPack.name}_encoder",
-                java.io.File(directory, "encoder_model_int8.onnx"),
+                java.io.File(directory, "encoder_model.onnx"),
             )
             val decoder = OnnxSessionCache.getOrCreate(
                 "${recognitionPack.name}_decoder",

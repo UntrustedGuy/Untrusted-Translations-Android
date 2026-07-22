@@ -140,8 +140,8 @@ object ModelPackManager {
         ModelPackInfo(
             ModelPackId.MANGA_OCR_JAPANESE,
             "Manga-OCR Japanese",
-            "Japanese Manga-OCR recognizer (int8, ~2x faster). Uses the separately downloaded shared comic dialogue detector.",
-            36, 3, "Apache-2.0 Manga-OCR. May be slow on older devices.",
+            "Japanese Manga-OCR recognizer (int8 decoder, ~2x faster). Uses the separately downloaded shared comic dialogue detector.",
+            52, 3, "Apache-2.0 Manga-OCR. May be slow on older devices.",
         ),
         ModelPackInfo(
             ModelPackId.NLLB_TRANSLATION,
@@ -366,9 +366,9 @@ object ModelPackManager {
         )
         ModelPackId.MANGA_OCR_JAPANESE -> listOf(
             PackFile(
-                "encoder_model_int8.onnx",
-                "$ASSETS_BASE/manga-ocr-2025-encoder-int8.onnx",
-                "51ecce0762d4d27809f6866392729bcb74935bdd3c315f2f8f7c207654f7aac4",
+                "encoder_model.onnx",
+                "$MANGA_OCR_BASE/encoder_model.onnx",
+                "f87668ae0f62d6f032dac6b213e8c0fea84cd15895ac8cab624cc9a2f49d4a27",
             ),
             PackFile(
                 "decoder_model_int8.onnx",

@@ -6,17 +6,15 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Log
 import com.untrustedtranslations.android.model.ComicPage
 import com.untrustedtranslations.android.model.RelativeBounds
 import com.untrustedtranslations.android.model.SourceScript
 import com.untrustedtranslations.android.model.TextBlock
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 import java.text.Normalizer
@@ -28,10 +26,13 @@ internal object MangaOcrPageEngine {
     private const val START_TOKEN = 2L
     private const val END_TOKEN = 3L
     private const val MAX_TOKENS = 64
+    private const val RECOGNITION_BATCH_SIZE = 4
 
     private data class Reading(val text: String, val confidence: Float)
+    private data class RegionCrop(val region: ComicDialogueDetector.Region, val crop: Bitmap)
 
     private val vocabularyCache = AtomicReference<Pair<String, List<String>>?>(null)
+    @Volatile private var batchedDecoderSupported: Boolean? = null
 
     private fun vocabularyFor(file: java.io.File): List<String> {
         vocabularyCache.get()?.let { (path, lines) -> if (path == file.absolutePath) return lines }
@@ -53,10 +54,12 @@ internal object MangaOcrPageEngine {
         require(ModelPackManager.isInstalled(context, recognitionPack)) { "Manga-OCR pack not installed." }
         val detectorDirectory = ModelPackManager.directory(context, detectorPack)
         val directory = ModelPackManager.directory(context, recognitionPack)
+        val totalStarted = System.nanoTime()
         val bitmap = context.contentResolver.openInputStream(page.originalSource)
             ?.use(BitmapFactory::decodeStream)
             ?: error("Cannot open page.")
         try {
+            val detectorStarted = System.nanoTime()
             val regions = ComicDialogueDetector.detect(
                 "shared_comic_dialogue_detector",
                 java.io.File(detectorDirectory, "comic_dialogue_detector.onnx"),
@@ -64,6 +67,12 @@ internal object MangaOcrPageEngine {
                 minimumScore = if (deepScan) .22f else .35f,
                 pageKey = page.originalSource.toString(),
             )
+            val detectorMs = elapsedMs(detectorStarted)
+            if (regions.isEmpty()) {
+                Log.i("MangaOCR", "regions=0 detector=${detectorMs}ms total=${elapsedMs(totalStarted)}ms")
+                return@withContext emptyList()
+            }
+
             val environment = OnnxSessionCache.environment
             val encoder = OnnxSessionCache.getOrCreate(
                 "${recognitionPack.name}_encoder",
@@ -75,60 +84,100 @@ internal object MangaOcrPageEngine {
             )
             validateModelContract(encoder, decoder)
             val vocabulary = vocabularyFor(java.io.File(directory, "vocab.txt"))
-            // Autoregressive decoding is the bottleneck; two crops in flight overlaps the
-            // encoder of one bubble with the decoder loop of another.
-            val parallelism = Semaphore(
-                minOf(4, maxOf(2, Runtime.getRuntime().availableProcessors() / 2)),
-            )
-            val blocks = coroutineScope {
-                regions.map { region ->
-                    async {
-                        parallelism.withPermit {
-                            val recognitionRect = paddedCrop(region.rect, bitmap.width, bitmap.height)
-                            val crop = Bitmap.createBitmap(
-                                bitmap,
-                                recognitionRect.left,
-                                recognitionRect.top,
-                                recognitionRect.width(),
-                                recognitionRect.height(),
-                            )
-                            val reading = try {
-                                recognize(environment, encoder, decoder, crop, vocabulary)
-                            } finally {
-                                crop.recycle()
-                            }
-                            if (reading.text.isBlank() || reading.confidence < .18f) return@withPermit null
-                            val bounds = RelativeBounds(
-                                region.rect.left / bitmap.width.toFloat(),
-                                region.rect.top / bitmap.height.toFloat(),
-                                region.rect.right / bitmap.width.toFloat(),
-                                region.rect.bottom / bitmap.height.toFloat(),
-                            )
-                            TextBlock(
-                                id = UUID.randomUUID().toString(),
-                                originalText = reading.text,
-                                translatedText = reading.text,
-                                bounds = bounds,
-                                eraseBounds = bounds,
-                                style = LetteringStyleEstimator.estimate(
-                                    context,
-                                    bitmap,
-                                    region.rect,
-                                    reading.text,
-                                    script,
-                                    null,
-                                ),
-                            )
-                        }
-                    }
-                }.awaitAll().filterNotNull()
+
+            val crops = regions.map { region ->
+                val recognitionRect = paddedCrop(region.rect, bitmap.width, bitmap.height)
+                RegionCrop(
+                    region,
+                    Bitmap.createBitmap(
+                        bitmap,
+                        recognitionRect.left,
+                        recognitionRect.top,
+                        recognitionRect.width(),
+                        recognitionRect.height(),
+                    ),
+                )
             }
-            // Each region is already one speech-bubble text block. Grouping here could merge
-            // adjacent bubbles and heuristic filtering could discard legitimate one-character replies.
-            ReadingOrder.sort(blocks, script)
+
+            val recognitionStarted = System.nanoTime()
+            val readings = try {
+                recognizeMany(environment, encoder, decoder, crops.map { it.crop }, vocabulary)
+            } finally {
+                crops.forEach { it.crop.recycle() }
+            }
+            val recognitionMs = elapsedMs(recognitionStarted)
+            val styleStarted = System.nanoTime()
+
+            val blocks = crops.indices.mapNotNull { index ->
+                val reading = readings[index]
+                if (reading.text.isBlank() || reading.confidence < .18f) return@mapNotNull null
+                val region = crops[index].region
+                val bounds = RelativeBounds(
+                    region.rect.left / bitmap.width.toFloat(),
+                    region.rect.top / bitmap.height.toFloat(),
+                    region.rect.right / bitmap.width.toFloat(),
+                    region.rect.bottom / bitmap.height.toFloat(),
+                )
+                TextBlock(
+                    id = UUID.randomUUID().toString(),
+                    originalText = reading.text,
+                    translatedText = reading.text,
+                    bounds = bounds,
+                    eraseBounds = bounds,
+                    style = LetteringStyleEstimator.estimate(
+                        context,
+                        bitmap,
+                        region.rect,
+                        reading.text,
+                        script,
+                        null,
+                    ),
+                )
+            }
+            val sorted = ReadingOrder.sort(blocks, script)
+            Log.i(
+                "MangaOCR",
+                "regions=${regions.size} kept=${sorted.size} detector=${detectorMs}ms " +
+                    "recognize=${recognitionMs}ms style=${elapsedMs(styleStarted)}ms total=${elapsedMs(totalStarted)}ms " +
+                    "batch=${batchedDecoderSupported != false}",
+            )
+            sorted
         } finally {
             bitmap.recycle()
         }
+    }
+
+    private fun recognizeMany(
+        environment: OrtEnvironment,
+        encoder: OrtSession,
+        decoder: OrtSession,
+        bitmaps: List<Bitmap>,
+        vocabulary: List<String>,
+    ): List<Reading> {
+        if (bitmaps.isEmpty()) return emptyList()
+        if (batchedDecoderSupported == false) {
+            return bitmaps.map { recognizeBatch(environment, encoder, decoder, listOf(it), vocabulary).single() }
+        }
+
+        val output = ArrayList<Reading>(bitmaps.size)
+        bitmaps.chunked(RECOGNITION_BATCH_SIZE).forEach { chunk ->
+            if (chunk.size == 1) {
+                output += recognizeBatch(environment, encoder, decoder, chunk, vocabulary)
+                return@forEach
+            }
+            try {
+                output += recognizeBatch(environment, encoder, decoder, chunk, vocabulary)
+                batchedDecoderSupported = true
+            } catch (batchFailure: Exception) {
+                // Some third-party ONNX exports hard-code batch=1. Keep compatibility with those
+                // packs while using batched decoding automatically whenever the model supports it.
+                batchedDecoderSupported = false
+                chunk.forEach { bitmap ->
+                    output += recognizeBatch(environment, encoder, decoder, listOf(bitmap), vocabulary)
+                }
+            }
+        }
+        return output
     }
 
     private fun paddedCrop(rect: android.graphics.Rect, pageWidth: Int, pageHeight: Int): android.graphics.Rect {
@@ -149,79 +198,140 @@ internal object MangaOcrPageEngine {
         }
     }
 
-    private fun recognize(
+    /**
+     * Runs several speech bubbles through one encoder/decoder batch. The old implementation
+     * launched one decoder Run per bubble per token and converted every 3-D logits result into
+     * nested Java arrays. That conversion is particularly expensive on Android. This path keeps
+     * inference in flat NIO buffers and reads only the final time-step logits needed for greedy
+     * generation.
+     */
+    private fun recognizeBatch(
         environment: OrtEnvironment,
         encoder: OrtSession,
         decoder: OrtSession,
-        bitmap: Bitmap,
+        bitmaps: List<Bitmap>,
         vocabulary: List<String>,
-    ): Reading {
-        val resized = Bitmap.createScaledBitmap(bitmap, 224, 224, true)
-        try {
-            val pixels = rgbImageTensor(resized)
-            OnnxTensor.createTensor(
-                environment,
-                FloatBuffer.wrap(pixels),
-                longArrayOf(1, 3, 224, 224),
-            ).use { imageTensor ->
-                encoder.run(mapOf("pixel_values" to imageTensor)).use { encoderResult ->
-                    val hidden = encoderResult.get("last_hidden_state").orElse(encoderResult[0]) as OnnxTensor
-                    val generated = LongArray(MAX_TOKENS + 1)
-                    generated[0] = START_TOKEN
-                    var generatedSize = 1
-                    val seenTrigrams = HashMap<Long, MutableSet<Long>>()
-                    var probabilitySum = 0f
-                    var probabilityCount = 0
-                    repeat(MAX_TOKENS) {
-                        OnnxTensor.createTensor(
-                            environment,
-                            LongBuffer.wrap(generated, 0, generatedSize),
-                            longArrayOf(1, generatedSize.toLong()),
-                        ).use { idTensor ->
-                            decoder.run(
-                                mapOf(
-                                    "input_ids" to idTensor,
-                                    "encoder_hidden_states" to hidden,
-                                ),
-                            ).use { decoderResult ->
-                                @Suppress("UNCHECKED_CAST")
-                                val logits = decoderResult.get("logits").orElse(decoderResult[0]).value
-                                    as Array<Array<FloatArray>>
-                                val last = logits[0].last()
-                                val choice = chooseToken(last, generated, generatedSize, seenTrigrams)
+    ): List<Reading> {
+        require(bitmaps.isNotEmpty())
+        val batchSize = bitmaps.size
+        val pixelCountPerImage = 3 * 224 * 224
+        val pixelBuffer = directFloatBuffer(batchSize * pixelCountPerImage)
+
+        bitmaps.forEach { bitmap ->
+            val resized = Bitmap.createScaledBitmap(bitmap, 224, 224, true)
+            try {
+                appendRgbImageTensor(resized, pixelBuffer)
+            } finally {
+                if (resized !== bitmap) resized.recycle()
+            }
+        }
+        pixelBuffer.rewind()
+
+        var finalReadings: List<Reading>? = null
+        OnnxTensor.createTensor(
+            environment,
+            pixelBuffer,
+            longArrayOf(batchSize.toLong(), 3, 224, 224),
+        ).use { imageTensor ->
+            encoder.run(mapOf("pixel_values" to imageTensor)).use { encoderResult ->
+                val hidden = encoderResult.get("last_hidden_state").orElse(encoderResult[0]) as OnnxTensor
+                val generated = Array(batchSize) { LongArray(MAX_TOKENS + 1).apply { this[0] = START_TOKEN } }
+                val generatedSizes = IntArray(batchSize) { 1 }
+                val seenTrigrams = Array(batchSize) { HashMap<Long, MutableSet<Long>>() }
+                val probabilitySums = FloatArray(batchSize)
+                val probabilityCounts = IntArray(batchSize)
+                val done = BooleanArray(batchSize)
+
+                for (step in 0 until MAX_TOKENS) {
+                    if (done.all { it }) break
+                    val sequenceLength = step + 1
+                    val idBuffer = directLongBuffer(batchSize * sequenceLength)
+                    for (batch in 0 until batchSize) {
+                        while (done[batch] && generatedSizes[batch] < sequenceLength) {
+                            generated[batch][generatedSizes[batch]++] = END_TOKEN
+                        }
+                        for (position in 0 until sequenceLength) {
+                            idBuffer.put(generated[batch][position])
+                        }
+                    }
+                    idBuffer.rewind()
+
+                    OnnxTensor.createTensor(
+                        environment,
+                        idBuffer,
+                        longArrayOf(batchSize.toLong(), sequenceLength.toLong()),
+                    ).use { idTensor ->
+                        decoder.run(
+                            mapOf(
+                                "input_ids" to idTensor,
+                                "encoder_hidden_states" to hidden,
+                            ),
+                        ).use { decoderResult ->
+                            val logitsTensor = decoderResult.get("logits").orElse(decoderResult[0]) as OnnxTensor
+                            val shape = logitsTensor.info.shape
+                            require(shape.size == 3) { "Unsupported Manga-OCR logits shape." }
+                            val outputBatch = shape[0].toInt()
+                            val outputSequence = shape[1].toInt()
+                            val vocabularySize = shape[2].toInt()
+                            require(outputBatch == batchSize && outputSequence >= 1 && vocabularySize > 0) {
+                                "Unsupported Manga-OCR decoder output dimensions."
+                            }
+                            val logits = logitsTensor.floatBuffer
+                                ?: error("Manga-OCR decoder logits are not floating point.")
+                            val lastPosition = outputSequence - 1
+
+                            for (batch in 0 until batchSize) {
+                                if (done[batch]) continue
+                                val offset = ((batch * outputSequence + lastPosition) * vocabularySize)
+                                val choice = chooseToken(
+                                    logits,
+                                    offset,
+                                    vocabularySize,
+                                    generated[batch],
+                                    generatedSizes[batch],
+                                    seenTrigrams[batch],
+                                )
                                 if (choice.index.toLong() == END_TOKEN) {
-                                    return Reading(
-                                        decode(generated, 1, generatedSize, vocabulary),
-                                        if (probabilityCount == 0) 0f else probabilitySum / probabilityCount,
-                                    )
+                                    generated[batch][generatedSizes[batch]++] = END_TOKEN
+                                    done[batch] = true
+                                    continue
                                 }
-                                generated[generatedSize++] = choice.index.toLong()
-                                if (generatedSize >= 3) {
-                                    val first = generated[generatedSize - 3]
-                                    val second = generated[generatedSize - 2]
-                                    val third = generated[generatedSize - 1]
-                                    seenTrigrams.getOrPut(pairKey(first, second)) { HashSet() }.add(third)
+
+                                generated[batch][generatedSizes[batch]++] = choice.index.toLong()
+                                if (generatedSizes[batch] >= 3) {
+                                    val first = generated[batch][generatedSizes[batch] - 3]
+                                    val second = generated[batch][generatedSizes[batch] - 2]
+                                    val third = generated[batch][generatedSizes[batch] - 1]
+                                    seenTrigrams[batch].getOrPut(pairKey(first, second)) { HashSet() }.add(third)
                                 }
-                                probabilitySum += choice.probability
-                                probabilityCount++
+                                probabilitySums[batch] += choice.probability
+                                probabilityCounts[batch]++
                             }
                         }
                     }
-                    return Reading(
-                        decode(generated, 1, generatedSize, vocabulary),
-                        if (probabilityCount == 0) 0f else probabilitySum / probabilityCount,
+                }
+
+                finalReadings = List(batchSize) { batch ->
+                    val endExclusive = generatedSizes[batch].let { size ->
+                        if (size > 1 && generated[batch][size - 1] == END_TOKEN) size - 1 else size
+                    }
+                    Reading(
+                        decode(generated[batch], 1, endExclusive, vocabulary),
+                        if (probabilityCounts[batch] == 0) 0f
+                        else probabilitySums[batch] / probabilityCounts[batch],
                     )
                 }
             }
-        } finally {
-            if (resized !== bitmap) resized.recycle()
         }
+        return finalReadings ?: error("Manga-OCR batch did not produce a result.")
     }
 
     private data class TokenChoice(val index: Int, val probability: Float)
 
     private fun chooseToken(
-        logits: FloatArray,
+        logits: FloatBuffer,
+        offset: Int,
+        vocabularySize: Int,
         generated: LongArray,
         generatedSize: Int,
         seenTrigrams: Map<Long, Set<Long>>,
@@ -232,8 +342,8 @@ internal object MangaOcrPageEngine {
         var best = 0
         var softmaxMax = Double.NEGATIVE_INFINITY
         var softmaxSum = 0.0
-        for (candidate in logits.indices) {
-            val value = logits[candidate].toDouble()
+        for (candidate in 0 until vocabularySize) {
+            val value = logits.get(offset + candidate).toDouble()
             if (value > softmaxMax) {
                 softmaxSum = if (softmaxMax.isFinite()) {
                     softmaxSum * exp(softmaxMax - value) + 1.0
@@ -243,10 +353,11 @@ internal object MangaOcrPageEngine {
                 softmaxSum += exp(value - softmaxMax)
             }
             if (candidate == 0 || banned?.contains(candidate.toLong()) == true) continue
-            if (best == 0 || logits[candidate] > logits[best]) best = candidate
+            if (best == 0 || value > logits.get(offset + best)) best = candidate
         }
+        val bestLogit = if (best == 0) Double.NEGATIVE_INFINITY else logits.get(offset + best).toDouble()
         val probability = if (best == 0 || softmaxSum <= 0.0) 0f else
-            (exp(logits[best].toDouble() - softmaxMax) / softmaxSum).toFloat()
+            (exp(bestLogit - softmaxMax) / softmaxSum).toFloat()
         return TokenChoice(best, probability)
     }
 
@@ -264,16 +375,23 @@ internal object MangaOcrPageEngine {
         return Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
     }
 
-    private fun rgbImageTensor(bitmap: Bitmap): FloatArray {
+    private fun appendRgbImageTensor(bitmap: Bitmap, output: FloatBuffer) {
         val pixels = IntArray(bitmap.width * bitmap.height)
         bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        val plane = pixels.size
-        return FloatArray(plane * 3).also { output ->
-            pixels.forEachIndexed { index, color ->
-                output[index] = ((color ushr 16 and 255) / 255f - .5f) / .5f
-                output[plane + index] = ((color ushr 8 and 255) / 255f - .5f) / .5f
-                output[plane * 2 + index] = ((color and 255) / 255f - .5f) / .5f
-            }
-        }
+        pixels.forEach { color -> output.put(((color ushr 16 and 255) / 255f - .5f) / .5f) }
+        pixels.forEach { color -> output.put(((color ushr 8 and 255) / 255f - .5f) / .5f) }
+        pixels.forEach { color -> output.put(((color and 255) / 255f - .5f) / .5f) }
     }
+
+    private fun directFloatBuffer(elements: Int): FloatBuffer =
+        ByteBuffer.allocateDirect(elements * Float.SIZE_BYTES)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+
+    private fun directLongBuffer(elements: Int): LongBuffer =
+        ByteBuffer.allocateDirect(elements * Long.SIZE_BYTES)
+            .order(ByteOrder.nativeOrder())
+            .asLongBuffer()
+
+    private fun elapsedMs(started: Long): Long = (System.nanoTime() - started) / 1_000_000L
 }

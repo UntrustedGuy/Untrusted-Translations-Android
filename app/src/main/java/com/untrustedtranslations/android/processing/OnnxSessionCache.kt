@@ -14,10 +14,13 @@ internal object OnnxSessionCache {
     fun getOrCreate(key: String, model: File): OrtSession =
         sessions.getOrPut(key) {
             val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
-            val recognitionHeavy = key.contains("_rec") || key.contains("_decoder")
+            val recognitionHeavy = key.contains("_rec")
+            // Manga-OCR decoder runs are now batched instead of four concurrent session.run calls,
+            // so non-recognizer sessions can use four intra-op workers without oversubscribing them.
             val threads = minOf(if (recognitionHeavy) 2 else 4, cores)
             val accelerated = OrtSession.SessionOptions().apply {
                 setIntraOpNumThreads(threads)
+                setInterOpNumThreads(1)
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                 runCatching { addXnnpack(mapOf("intra_op_num_threads" to threads.toString())) }
             }
@@ -26,6 +29,7 @@ internal object OnnxSessionCache {
             } catch (acceleratedFailure: Exception) {
                 val cpuOnly = OrtSession.SessionOptions().apply {
                     setIntraOpNumThreads(threads)
+                    setInterOpNumThreads(1)
                     setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                 }
                 try {

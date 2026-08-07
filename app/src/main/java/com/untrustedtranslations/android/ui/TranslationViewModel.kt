@@ -362,7 +362,6 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         }
         perf.start()
         runBusy(message) {
-            perf.lap("Detect")
             val primaryDetected = when (ocrProvider) {
                 OcrProvider.GEMINI_FREE -> GeminiPageEngine.process(
                     getApplication(), page, sourceScript, sourceLanguageTag,
@@ -406,8 +405,9 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 OcrProvider.MANGA_OCR,
                 OcrProvider.COMIC_AI_VISION -> primaryDetected
             }
+            perf.lap("OCR")
             val manualBlocks = page.blocks.filter { it.eraseBounds == null }
-            perf.lap("Translate")
+            busyMessage = "Translating dialogue..."
             val translated = if (
                 (ocrProvider == OcrProvider.GEMINI_FREE &&
                     translationProvider == TranslationProvider.GEMINI_FREE) ||
@@ -430,6 +430,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                     block.withAutomaticTranslationLayout(result)
                 }
             }
+            perf.lap("Translate")
             recordState()
             replaceCurrentPage(
                 page.copy(renderedSource = page.originalSource, blocks = translated + manualBlocks, processed = true, saved = false),

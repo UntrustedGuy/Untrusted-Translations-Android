@@ -11,8 +11,8 @@ android {
         applicationId = "com.untrustedtranslations.android"
         minSdk = 23
         targetSdk = 36
-        versionCode = 17
-        versionName = "1.1.0"
+        versionCode = 19
+        versionName = "1.3.0"
     }
     signingConfigs {
         create("release") {

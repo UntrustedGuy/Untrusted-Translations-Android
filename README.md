@@ -45,14 +45,14 @@ Your original import is never edited in place. Images export as PNG, PDF as PDF,
 
 ## Install
 
-The current release is **1.0.0**. Most physical Android phones want the **ARM64** APK; the x86_64 build is mainly for emulators.
+The current release is **1.3.0**. Most physical Android phones want the **ARM64** APK; the x86_64 build is mainly for emulators.
 
 Two editions are published per release:
 
 - **Full** — everything, including Google ML Kit for quick baseline OCR and translation.
 - **FOSS** — the same app without the closed-source ML Kit SDK, using the local open-source engines instead. Pick this one if you want a fully Google-free build (F-Droid style) — it's right on the Releases page.
 
-If you're coming from a 0.x beta, uninstall it once before installing 1.0.0 — the release is now signed with a permanent key, and Android refuses to update across a key change. From 1.0.0 onward, updates install normally over the top and keep your projects, settings, and downloaded models.
+If you're coming from a 0.x beta, uninstall it once before installing v1.0.0+ builds — the v1.0.0 release is now signed with a permanent key, and Android refuses to update across a key change. From 1.0.0 onward, updates install normally over the top and keep your projects, settings, and downloaded models.
 
 The models aren't hidden inside the APK. Optional OCR and translation packs are downloaded from their credited upstream projects only when you pick them.
 

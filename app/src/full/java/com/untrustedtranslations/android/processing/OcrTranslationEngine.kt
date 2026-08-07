@@ -24,10 +24,13 @@ import com.untrustedtranslations.android.model.SourceScript
 import com.untrustedtranslations.android.model.TextBlock
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.math.atan2
 
 object OcrTranslationEngine {
+    private val recognizerCache = ConcurrentHashMap<SourceScript, TextRecognizer>()
+
     private data class Detection(
         val text: String,
         val bounds: RelativeBounds,
@@ -46,67 +49,49 @@ object OcrTranslationEngine {
     ): List<TextBlock> {
         val path = requireNotNull(page.originalSource.path)
         val bitmap = requireNotNull(BitmapFactory.decodeFile(path)) { "Unable to inspect page lettering." }
+        val detectorPack = ModelPackId.COMIC_DIALOGUE_DETECTOR
+        require(ModelPackManager.isInstalled(context, detectorPack)) {
+            "Download the Comic dialogue detector first."
+        }
+        val dialogueRegions = ComicDialogueDetector.detect(
+            cacheKey = "shared_comic_dialogue_detector",
+            model = java.io.File(
+                ModelPackManager.directory(context, detectorPack),
+                "comic_dialogue_detector.onnx",
+            ),
+            bitmap = bitmap,
+            minimumScore = if (deepScan) .22f else .35f,
+            pageKey = page.originalSource.toString(),
+        )
         val recognizer = recognizer(script)
         val detections = try {
+            // Fast path: one normal full-page ML Kit pass. The comic detector below gates the
+            // result to dialogue, so sound effects do not trigger expensive retry work.
             val original = recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
             val candidates = extract(original, bitmap.width, bitmap.height, 1f).toMutableList()
+
             if (deepScan) {
-            tileRects(bitmap.width, bitmap.height).forEach { tileRect ->
-                val tile = Bitmap.createBitmap(
-                    bitmap,
-                    tileRect.left,
-                    tileRect.top,
-                    tileRect.width(),
-                    tileRect.height(),
-                )
-                val scale = (1600f / maxOf(tile.width, tile.height)).coerceIn(1.25f, 2.2f)
-                val enlarged = Bitmap.createScaledBitmap(
-                    tile,
-                    (tile.width * scale).toInt(),
-                    (tile.height * scale).toInt(),
-                    true,
-                )
-                val thresholded = mangaContrast(enlarged)
-                val inverted = mangaContrast(enlarged, invert = true)
-                try {
-                    val tileResult = recognizer.process(InputImage.fromBitmap(enlarged, 0)).await()
-                    candidates += extract(
-                        tileResult,
-                        bitmap.width,
-                        bitmap.height,
-                        scale,
-                        tileRect.left,
-                        tileRect.top,
+                // The old deep scan blindly ran 4 tiles x 3 variants after the full-page pass
+                // (13 ML Kit calls total). Retry only dialogue bubbles that the fast pass missed.
+                dialogueRegions.filterNot { region ->
+                    candidates.any { detectionMatchesRegion(it.pixelBox, region.rect) }
+                }.forEach { region ->
+                    candidates += scanDialogueRegion(
+                        recognizer = recognizer,
+                        page = bitmap,
+                        region = region.rect,
                     )
-                    val thresholdResult = recognizer.process(InputImage.fromBitmap(thresholded, 0)).await()
-                    candidates += extract(
-                        thresholdResult,
-                        bitmap.width,
-                        bitmap.height,
-                        scale,
-                        tileRect.left,
-                        tileRect.top,
-                    )
-                    val invertedResult = recognizer.process(InputImage.fromBitmap(inverted, 0)).await()
-                    candidates += extract(
-                        invertedResult,
-                        bitmap.width,
-                        bitmap.height,
-                        scale,
-                        tileRect.left,
-                        tileRect.top,
-                    )
-                } finally {
-                    inverted.recycle()
-                    thresholded.recycle()
-                    enlarged.recycle()
-                    tile.recycle()
                 }
             }
-            }
-            mergeDetections(candidates, bitmap.width, bitmap.height, script).filterNot(::looksLikeSoundEffect)
+
+            mergeDetections(candidates, bitmap.width, bitmap.height, script)
+                .filterNot(::looksLikeSoundEffect)
+                .filter { detection ->
+                    dialogueRegions.any { region -> detectionMatchesRegion(detection.pixelBox, region.rect) }
+                }
         } finally {
-            recognizer.close()
+            // Recognizers are intentionally cached across pages; reopening them repeatedly
+            // can re-pay model/runtime initialization costs. There are at most four scripts.
         }
 
         return try {
@@ -142,6 +127,76 @@ object OcrTranslationEngine {
         } finally {
             bitmap.recycle()
         }
+    }
+
+    private suspend fun scanDialogueRegion(
+        recognizer: TextRecognizer,
+        page: Bitmap,
+        region: Rect,
+    ): List<Detection> {
+        val cropRect = paddedCrop(region, page.width, page.height)
+        val crop = Bitmap.createBitmap(
+            page, cropRect.left, cropRect.top, cropRect.width(), cropRect.height(),
+        )
+        val scale = (1280f / maxOf(crop.width, crop.height)).coerceIn(1f, 2f)
+        val enlarged = if (scale > 1.02f) {
+            Bitmap.createScaledBitmap(
+                crop,
+                (crop.width * scale).toInt().coerceAtLeast(1),
+                (crop.height * scale).toInt().coerceAtLeast(1),
+                true,
+            )
+        } else crop
+        try {
+            val first = extract(
+                recognizer.process(InputImage.fromBitmap(enlarged, 0)).await(),
+                page.width, page.height, scale, cropRect.left, cropRect.top,
+            )
+            if (first.any { it.text.isNotBlank() && it.confidence >= .45f }) return first
+
+            val thresholded = mangaContrast(enlarged)
+            try {
+                val second = extract(
+                    recognizer.process(InputImage.fromBitmap(thresholded, 0)).await(),
+                    page.width, page.height, scale, cropRect.left, cropRect.top,
+                )
+                if (second.isNotEmpty()) return first + second
+            } finally {
+                thresholded.recycle()
+            }
+
+            val inverted = mangaContrast(enlarged, invert = true)
+            return try {
+                first + extract(
+                    recognizer.process(InputImage.fromBitmap(inverted, 0)).await(),
+                    page.width, page.height, scale, cropRect.left, cropRect.top,
+                )
+            } finally {
+                inverted.recycle()
+            }
+        } finally {
+            if (enlarged !== crop) enlarged.recycle()
+            crop.recycle()
+        }
+    }
+
+    private fun paddedCrop(rect: Rect, width: Int, height: Int): Rect {
+        val horizontalPadding = maxOf(12, rect.width() / 3)
+        val verticalPadding = maxOf(10, rect.height() / 8)
+        return Rect(
+            (rect.left - horizontalPadding).coerceAtLeast(0),
+            (rect.top - verticalPadding).coerceAtLeast(0),
+            (rect.right + horizontalPadding).coerceAtMost(width),
+            (rect.bottom + verticalPadding).coerceAtMost(height),
+        )
+    }
+
+    private fun detectionMatchesRegion(detection: Rect, region: Rect): Boolean {
+        if (region.contains(detection.centerX(), detection.centerY())) return true
+        val intersection = Rect()
+        if (!intersection.setIntersect(detection, region)) return false
+        val detectionArea = detection.width().coerceAtLeast(1).toLong() * detection.height().coerceAtLeast(1)
+        return intersection.width().toLong() * intersection.height() >= detectionArea * 3 / 10
     }
 
     private fun mangaContrast(source: Bitmap, invert: Boolean = false): Bitmap {
@@ -456,10 +511,13 @@ object OcrTranslationEngine {
         }
     }
 
-    private fun recognizer(script: SourceScript): TextRecognizer = when (script) {
-        SourceScript.JAPANESE -> TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
-        SourceScript.KOREAN -> TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
-        SourceScript.CHINESE -> TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
-        SourceScript.LATIN -> TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-    }
+    private fun recognizer(script: SourceScript): TextRecognizer =
+        recognizerCache.getOrPut(script) {
+            when (script) {
+                SourceScript.JAPANESE -> TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
+                SourceScript.KOREAN -> TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+                SourceScript.CHINESE -> TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+                SourceScript.LATIN -> TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+            }
+        }
 }

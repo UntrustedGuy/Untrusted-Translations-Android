@@ -35,6 +35,7 @@ internal object DialogueOnlyFilter {
                 model = detector,
                 bitmap = bitmap,
                 minimumScore = if (deepScan) .22f else .35f,
+                pageKey = page.originalSource.toString(),
             )
             blocks.filter { block ->
                 val source = block.eraseBounds ?: block.bounds

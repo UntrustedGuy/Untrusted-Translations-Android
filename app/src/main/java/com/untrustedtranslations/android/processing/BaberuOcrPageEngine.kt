@@ -42,8 +42,8 @@ internal object BaberuOcrPageEngine {
     }
 
     private fun dbnetDetect(f: File, bmp: Bitmap): List<Det> = try {
-        val env = OrtEnvironment.getEnvironment(); val sess = env.createSession(f.absolutePath)
-        val sc = min(1f, 1280f / max(bmp.width, bmp.height)); val w = ceil(bmp.width * sc / 32f).toInt().coerceAtLeast(32) * 32; val h = ceil(bmp.height * sc / 32f).toInt().coerceAtLeast(32) * 32
+        val env = OnnxSessionCache.environment; val sess = OnnxSessionCache.getOrCreate("baberu_det_${f.absolutePath.hashCode()}", f)
+        val sc = min(1f, 960f / max(bmp.width, bmp.height)); val w = ceil(bmp.width * sc / 32f).toInt().coerceAtLeast(32) * 32; val h = ceil(bmp.height * sc / 32f).toInt().coerceAtLeast(32) * 32
         val r = Bitmap.createScaledBitmap(bmp, w, h, true); val px = IntArray(w * h); r.getPixels(px, 0, w, 0, 0, w, h); val d = FloatArray(w * h * 3)
         for (i in px.indices) { d[i] = (px[i] and 255) / 255f; d[w * h + i] = (px[i] shr 8 and 255) / 255f; d[2 * w * h + i] = (px[i] shr 16 and 255) / 255f }
         OnnxTensor.createTensor(env, FloatBuffer.wrap(d), longArrayOf(1, 3, h.toLong(), w.toLong())).use { inp -> sess.run(mapOf(sess.inputNames.first() to inp)).use { res ->

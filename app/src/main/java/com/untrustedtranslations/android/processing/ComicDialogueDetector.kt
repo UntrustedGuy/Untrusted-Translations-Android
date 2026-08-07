@@ -14,17 +14,30 @@ internal object ComicDialogueDetector {
 
     data class Region(val rect: Rect, val confidence: Float)
 
-    private data class CachedResult(val width: Int, val height: Int, val minScore: Float, val regions: List<Region>)
-    private var lastResult: CachedResult? = null
+    private data class CachedResult(
+        val cacheKey: String,
+        val pageKey: String,
+        val width: Int,
+        val height: Int,
+        val minScore: Float,
+        val regions: List<Region>,
+    )
+    @Volatile private var lastResult: CachedResult? = null
 
     fun detect(
         cacheKey: String,
         model: File,
         bitmap: Bitmap,
         minimumScore: Float = .35f,
+        pageKey: String? = null,
     ): List<Region> {
+        val resolvedPageKey = pageKey ?:
+            "bitmap:${System.identityHashCode(bitmap)}:${bitmap.generationId}"
         lastResult?.let { cached ->
-            if (cached.width == bitmap.width && cached.height == bitmap.height && cached.minScore == minimumScore) {
+            if (cached.cacheKey == cacheKey && cached.pageKey == resolvedPageKey &&
+                cached.width == bitmap.width && cached.height == bitmap.height &&
+                cached.minScore == minimumScore
+            ) {
                 return cached.regions
             }
         }
@@ -72,7 +85,9 @@ internal object ComicDialogueDetector {
                             if (right - left < 3 || bottom - top < 3) null
                             else Region(Rect(left, top, right, bottom), scores[0][index])
                         }.suppressOverlaps()
-                        lastResult = CachedResult(bitmap.width, bitmap.height, minimumScore, regions)
+                        lastResult = CachedResult(
+                            cacheKey, resolvedPageKey, bitmap.width, bitmap.height, minimumScore, regions,
+                        )
                         return regions
                     }
                 }

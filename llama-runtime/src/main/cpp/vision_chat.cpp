@@ -67,10 +67,10 @@ Java_com_untrustedtranslations_android_processing_VisionLlmRuntime_nativeLoad(
     if (!model) return 1;
 
     auto cp = llama_context_default_params();
-    cp.n_ctx = 2048;
-    cp.n_batch = 256;
-    cp.n_ubatch = 128;
-    cp.n_threads = std::max(2, std::min(4, (int) sysconf(_SC_NPROCESSORS_ONLN) - 1));
+    cp.n_ctx = 1024;
+    cp.n_batch = 512;
+    cp.n_ubatch = 256;
+    cp.n_threads = std::max(2, std::min(6, (int) sysconf(_SC_NPROCESSORS_ONLN) - 1));
     cp.n_threads_batch = cp.n_threads;
     lctx = llama_init_from_model(model, cp);
     if (!lctx) { free_all(); return 2; }
@@ -81,8 +81,8 @@ Java_com_untrustedtranslations_android_processing_VisionLlmRuntime_nativeLoad(
     mp.print_timings = false;
     mp.n_threads = cp.n_threads;
     mp.warmup = false;
-    mp.image_min_tokens = 64;
-    mp.image_max_tokens = 256;
+    mp.image_min_tokens = 48;
+    mp.image_max_tokens = 128;
     vision = mtmd_init_from_file(projector_path, model, mp);
     env->ReleaseStringUTFChars(projector_path_j, projector_path);
     if (!vision || !mtmd_support_vision(vision)) { free_all(); return 3; }
@@ -141,7 +141,7 @@ Java_com_untrustedtranslations_android_processing_VisionLlmRuntime_nativeRead(
     llama_batch batch = llama_batch_init(1, 0, 1);
     const llama_vocab * vocab = llama_model_get_vocab(model);
     std::string output;
-    for (int i = 0; i < 192; ++i) {
+    for (int i = 0; i < 96; ++i) {
         const llama_token token = common_sampler_sample(sampler, lctx, -1);
         common_sampler_accept(sampler, token, true);
         if (llama_vocab_is_eog(vocab, token)) break;

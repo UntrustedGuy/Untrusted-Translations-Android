@@ -30,6 +30,7 @@ internal object ComicVisionPageEngine {
             val regions = ComicDialogueDetector.detect(
                 "shared_comic_dialogue_detector", detector, bitmap,
                 minimumScore = if (deepScan) .22f else .35f,
+                pageKey = page.originalSource.toString(),
             )
             val blocks = regions.mapNotNull { region ->
                 val cropRect = paddedCrop(region.rect, bitmap.width, bitmap.height)

@@ -163,7 +163,7 @@ object GeminiPageEngine {
                         .put("data", Base64.encodeToString(image, Base64.NO_WRAP)))))))
             .put("generationConfig", JSONObject()
                 .put("temperature", 0.15)
-                .put("maxOutputTokens", 8192)
+                .put("maxOutputTokens", 4096)
                 .put("responseMimeType", "application/json")
                 .put("responseSchema", JSONObject().put("type", "array").put("items", itemSchema)))
     }
@@ -220,7 +220,7 @@ object GeminiPageEngine {
     }
 
     private fun compressedPage(source: Bitmap): ByteArray {
-        val scale = (1600f / maxOf(source.width, source.height)).coerceAtMost(1f)
+        val scale = (1280f / maxOf(source.width, source.height)).coerceAtMost(1f)
         val resized = if (scale < 1f) Bitmap.createScaledBitmap(
             source,
             (source.width * scale).toInt().coerceAtLeast(1),
@@ -229,7 +229,7 @@ object GeminiPageEngine {
         ) else source
         return try {
             ByteArrayOutputStream().use { output ->
-                check(resized.compress(Bitmap.CompressFormat.JPEG, 90, output))
+                check(resized.compress(Bitmap.CompressFormat.JPEG, 85, output))
                 output.toByteArray()
             }
         } finally {

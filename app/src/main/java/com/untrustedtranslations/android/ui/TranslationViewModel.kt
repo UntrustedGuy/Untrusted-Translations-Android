@@ -156,7 +156,13 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         showAiSettingsDialog = true
     }
     fun dismissAiSettings() { showAiSettingsDialog = false }
-    fun chooseOcrProvider(value: OcrProvider) { ocrProvider = value }
+    fun chooseOcrProvider(value: OcrProvider) {
+        val previous = ocrProvider
+        ocrProvider = value
+        if (previous == OcrProvider.COMIC_AI_VISION && value != OcrProvider.COMIC_AI_VISION) {
+            viewModelScope.launch { VisionLlmRuntime.release() }
+        }
+    }
     fun chooseTranslationProvider(value: TranslationProvider) { translationProvider = value }
     fun chooseLocalTranslationPack(value: ModelPackId) {
         require(value in LocalLlmTranslationEngine.localLlmPacks)
@@ -368,7 +374,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 )
                 OcrProvider.RAPID_OCR,
                 OcrProvider.RAPID_OCR_V5 -> RapidOcrPageEngine.process(
-                    getApplication(), page, sourceScript, ocrPack,
+                    getApplication(), page, sourceScript, ocrPack, deepScan,
                 )
                 OcrProvider.MANGA_OCR -> MangaOcrPageEngine.process(
                     getApplication(),
@@ -388,20 +394,19 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 )
             }
             val detected = when (ocrProvider) {
-                OcrProvider.GEMINI_FREE,
-                OcrProvider.ML_KIT,
-                OcrProvider.RAPID_OCR,
-                OcrProvider.RAPID_OCR_V5 -> DialogueOnlyFilter.keepDialogue(
+                // Gemini inspects the whole page remotely, so keep the local dialogue gate.
+                OcrProvider.GEMINI_FREE -> DialogueOnlyFilter.keepDialogue(
                     getApplication(), page, primaryDetected, deepScan,
                 )
+                // These engines now use the shared dialogue detector before/during OCR, so a
+                // second bitmap decode + filtering pass would only duplicate work.
+                OcrProvider.ML_KIT,
+                OcrProvider.RAPID_OCR,
+                OcrProvider.RAPID_OCR_V5,
                 OcrProvider.MANGA_OCR,
                 OcrProvider.COMIC_AI_VISION -> primaryDetected
             }
             val manualBlocks = page.blocks.filter { it.eraseBounds == null }
-            if (ocrProvider == OcrProvider.COMIC_AI_VISION) {
-                VisionLlmRuntime.release()
-                perf.lap("Unload vision")
-            }
             perf.lap("Translate")
             val translated = if (
                 (ocrProvider == OcrProvider.GEMINI_FREE &&
@@ -441,7 +446,6 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             TranslationProvider.LOCAL_AI -> LocalLlmTranslationEngine.release()
             else -> Unit
         }
-        if (ocrProvider == OcrProvider.COMIC_AI_VISION) VisionLlmRuntime.release()
     }
 
 

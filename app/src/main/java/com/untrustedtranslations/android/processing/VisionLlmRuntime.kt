@@ -29,7 +29,7 @@ internal object VisionLlmRuntime {
     ): String = mutex.withLock {
         withContext(Dispatchers.IO) {
             ensureLoaded(context, pack)
-            val scaled = scaled(bitmap, 768)
+            val scaled = scaled(bitmap, 512)
             try {
                 val prompt = "Read the ${script.label} dialogue text in this comic speech bubble. " +
                     "Return the exact text only. Join its lines in natural reading order. " +

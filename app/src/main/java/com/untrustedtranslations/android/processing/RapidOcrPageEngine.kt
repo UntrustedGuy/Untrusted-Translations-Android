@@ -46,28 +46,34 @@ internal object RapidOcrPageEngine {
         crop: Bitmap,
         keys: List<String>,
     ): Reading {
-        fun readUpright(candidate: Bitmap): Reading {
-            val upright = if (classifier != null && shouldFlip(env, classifier, candidate)) {
-                rotate(candidate, 180f)
-            } else candidate
+        fun readOrientation(candidate: Bitmap): Reading {
+            val base = recognize(env, recognizer, candidate, keys)
+            // Most comic crops are already upright. Only pay for the angle classifier and
+            // a second recognition pass when the first reading is weak.
+            if (classifier == null || base.score >= .72f || !shouldFlip(env, classifier, candidate)) {
+                return base
+            }
+            val flipped = rotate(candidate, 180f)
             return try {
-                recognize(env, recognizer, upright, keys)
+                maxOf(base, recognize(env, recognizer, flipped, keys), compareBy { it.score })
             } finally {
-                if (upright !== candidate) upright.recycle()
+                flipped.recycle()
             }
         }
 
-        val base = readUpright(crop)
-        if (crop.height <= crop.width * 1.35f || base.score >= .8f) return base
-        val rotated = floatArrayOf(90f, -90f).map { degrees ->
-            val candidate = rotate(crop, degrees)
-            try {
-                readUpright(candidate)
-            } finally {
-                candidate.recycle()
-            }
-        }
-        return (rotated + base).maxBy { it.score }
+        val base = readOrientation(crop)
+        if (crop.height <= crop.width * 1.35f || base.score >= .78f) return base
+
+        val clockwise = rotate(crop, 90f)
+        val firstRotated = try { readOrientation(clockwise) } finally { clockwise.recycle() }
+        var best = if (firstRotated.score > base.score) firstRotated else base
+        // Avoid the third orientation when the first rotated reading is already clear.
+        if (best.score >= .74f || best.score >= base.score + .12f) return best
+
+        val counterClockwise = rotate(crop, -90f)
+        val secondRotated = try { readOrientation(counterClockwise) } finally { counterClockwise.recycle() }
+        if (secondRotated.score > best.score) best = secondRotated
+        return best
     }
 
     suspend fun process(
@@ -75,33 +81,51 @@ internal object RapidOcrPageEngine {
         page: ComicPage,
         script: SourceScript,
         pack: ModelPackId,
+        deepScan: Boolean = false,
     ): List<TextBlock> = withContext(Dispatchers.IO) {
         val dir = ModelPackManager.directory(context, pack)
         require(ModelPackManager.isInstalled(context, pack)) { "RapidOCR pack is not installed." }
         val bitmap = context.contentResolver.openInputStream(page.originalSource)?.use(BitmapFactory::decodeStream)
             ?: error("Could not open the comic page.")
         val environment = OnnxSessionCache.environment
-        val detector = OnnxSessionCache.getOrCreate("${pack.name}_det", java.io.File(dir, "det.onnx"))
+        val dialogueDetectorPack = ModelPackId.COMIC_DIALOGUE_DETECTOR
+        require(ModelPackManager.isInstalled(context, dialogueDetectorPack)) {
+            "Comic dialogue detector is not installed."
+        }
+        val dialogueDetector = java.io.File(
+            ModelPackManager.directory(context, dialogueDetectorPack),
+            "comic_dialogue_detector.onnx",
+        )
         val recognizer = OnnxSessionCache.getOrCreate("${pack.name}_rec", java.io.File(dir, "rec.onnx"))
         val classifierFile = java.io.File(dir, "cls.onnx")
         val classifier = if (classifierFile.isFile) {
             OnnxSessionCache.getOrCreate("${pack.name}_cls", classifierFile)
         } else null
         val keys = keysFor(pack, dir)
-        val detections = detect(environment, detector, bitmap)
-        // ORT session.run is thread-safe; two crops in flight keeps the cores busy without
-        // oversubscribing the intra-op thread pool.
-        val parallelism = Semaphore(4)
+        // The shared comic detector already finds dialogue regions and is required by every
+        // OCR provider. Using those regions directly avoids a second full-page DBNet pass and
+        // avoids recognizing sound effects that would be discarded immediately afterwards.
+        val regions = ComicDialogueDetector.detect(
+            cacheKey = "shared_comic_dialogue_detector",
+            model = dialogueDetector,
+            bitmap = bitmap,
+            minimumScore = if (deepScan) .22f else .35f,
+            pageKey = page.originalSource.toString(),
+        )
+        val parallelism = Semaphore(
+            minOf(4, maxOf(2, Runtime.getRuntime().availableProcessors() / 2)),
+        )
         val blocks = coroutineScope {
-            detections.map { detection ->
+            regions.map { region ->
                 async {
                     parallelism.withPermit {
+                        val recognitionRect = paddedCrop(region.rect, bitmap.width, bitmap.height)
                         val crop = Bitmap.createBitmap(
                             bitmap,
-                            detection.rect.left,
-                            detection.rect.top,
-                            detection.rect.width(),
-                            detection.rect.height(),
+                            recognitionRect.left,
+                            recognitionRect.top,
+                            recognitionRect.width(),
+                            recognitionRect.height(),
                         )
                         val reading = try {
                             readBest(environment, recognizer, classifier, crop, keys)
@@ -111,10 +135,10 @@ internal object RapidOcrPageEngine {
                         val text = reading.text.trim()
                         if (reading.score < .38f || text.isBlank()) return@withPermit null
                         val bounds = RelativeBounds(
-                            detection.rect.left.toFloat() / bitmap.width,
-                            detection.rect.top.toFloat() / bitmap.height,
-                            detection.rect.right.toFloat() / bitmap.width,
-                            detection.rect.bottom.toFloat() / bitmap.height,
+                            region.rect.left.toFloat() / bitmap.width,
+                            region.rect.top.toFloat() / bitmap.height,
+                            region.rect.right.toFloat() / bitmap.width,
+                            region.rect.bottom.toFloat() / bitmap.height,
                         )
                         TextBlock(
                             id = UUID.randomUUID().toString(),
@@ -123,7 +147,7 @@ internal object RapidOcrPageEngine {
                             bounds = bounds,
                             eraseBounds = bounds,
                             style = LetteringStyleEstimator.estimate(
-                                context, bitmap, detection.rect, text, script, null,
+                                context, bitmap, region.rect, text, script, null,
                             ),
                         )
                     }
@@ -131,7 +155,18 @@ internal object RapidOcrPageEngine {
             }.awaitAll().filterNotNull()
         }
         bitmap.recycle()
-        BlockGrouping.filterDialogue(BlockGrouping.groupIntoBubbles(blocks, script))
+        ReadingOrder.sort(blocks, script)
+    }
+
+    private fun paddedCrop(rect: Rect, pageWidth: Int, pageHeight: Int): Rect {
+        val horizontalPadding = maxOf(10, rect.width() / 3)
+        val verticalPadding = maxOf(8, rect.height() / 10)
+        return Rect(
+            (rect.left - horizontalPadding).coerceAtLeast(0),
+            (rect.top - verticalPadding).coerceAtLeast(0),
+            (rect.right + horizontalPadding).coerceAtMost(pageWidth),
+            (rect.bottom + verticalPadding).coerceAtMost(pageHeight),
+        )
     }
 
     data class CropReading(val text: String, val confidence: Float)
@@ -266,7 +301,7 @@ internal object RapidOcrPageEngine {
         keys: List<String>,
     ): Reading {
         val height = 48
-        val width = (bitmap.width * height.toFloat() / bitmap.height).roundToInt().coerceIn(16, 960)
+        val width = (bitmap.width * height.toFloat() / bitmap.height).roundToInt().coerceIn(16, 640)
         val resized = Bitmap.createScaledBitmap(bitmap, width, height, true)
         try {
             val data = bitmapTensor(

@@ -27,7 +27,7 @@ import kotlin.math.exp
 internal object MangaOcrPageEngine {
     private const val START_TOKEN = 2L
     private const val END_TOKEN = 3L
-    private const val MAX_TOKENS = 80
+    private const val MAX_TOKENS = 64
 
     private data class Reading(val text: String, val confidence: Float)
 
@@ -62,6 +62,7 @@ internal object MangaOcrPageEngine {
                 java.io.File(detectorDirectory, "comic_dialogue_detector.onnx"),
                 bitmap,
                 minimumScore = if (deepScan) .22f else .35f,
+                pageKey = page.originalSource.toString(),
             )
             val environment = OnnxSessionCache.environment
             val encoder = OnnxSessionCache.getOrCreate(
@@ -76,7 +77,9 @@ internal object MangaOcrPageEngine {
             val vocabulary = vocabularyFor(java.io.File(directory, "vocab.txt"))
             // Autoregressive decoding is the bottleneck; two crops in flight overlaps the
             // encoder of one bubble with the decoder loop of another.
-            val parallelism = Semaphore(4)
+            val parallelism = Semaphore(
+                minOf(4, maxOf(2, Runtime.getRuntime().availableProcessors() / 2)),
+            )
             val blocks = coroutineScope {
                 regions.map { region ->
                     async {
@@ -163,15 +166,17 @@ internal object MangaOcrPageEngine {
             ).use { imageTensor ->
                 encoder.run(mapOf("pixel_values" to imageTensor)).use { encoderResult ->
                     val hidden = encoderResult.get("last_hidden_state").orElse(encoderResult[0]) as OnnxTensor
-                    val generated = mutableListOf(START_TOKEN)
+                    val generated = LongArray(MAX_TOKENS + 1)
+                    generated[0] = START_TOKEN
+                    var generatedSize = 1
+                    val seenTrigrams = HashMap<Long, MutableSet<Long>>()
                     var probabilitySum = 0f
                     var probabilityCount = 0
                     repeat(MAX_TOKENS) {
-                        val ids = generated.toLongArray()
                         OnnxTensor.createTensor(
                             environment,
-                            LongBuffer.wrap(ids),
-                            longArrayOf(1, ids.size.toLong()),
+                            LongBuffer.wrap(generated, 0, generatedSize),
+                            longArrayOf(1, generatedSize.toLong()),
                         ).use { idTensor ->
                             decoder.run(
                                 mapOf(
@@ -183,19 +188,27 @@ internal object MangaOcrPageEngine {
                                 val logits = decoderResult.get("logits").orElse(decoderResult[0]).value
                                     as Array<Array<FloatArray>>
                                 val last = logits[0].last()
-                                val best = bestAllowedToken(last, generated)
-                                if (best.toLong() == END_TOKEN) return Reading(
-                                    decode(generated.drop(1), vocabulary),
-                                    if (probabilityCount == 0) 0f else probabilitySum / probabilityCount,
-                                )
-                                generated += best.toLong()
-                                probabilitySum += tokenProbability(last, best)
+                                val choice = chooseToken(last, generated, generatedSize, seenTrigrams)
+                                if (choice.index.toLong() == END_TOKEN) {
+                                    return Reading(
+                                        decode(generated, 1, generatedSize, vocabulary),
+                                        if (probabilityCount == 0) 0f else probabilitySum / probabilityCount,
+                                    )
+                                }
+                                generated[generatedSize++] = choice.index.toLong()
+                                if (generatedSize >= 3) {
+                                    val first = generated[generatedSize - 3]
+                                    val second = generated[generatedSize - 2]
+                                    val third = generated[generatedSize - 1]
+                                    seenTrigrams.getOrPut(pairKey(first, second)) { HashSet() }.add(third)
+                                }
+                                probabilitySum += choice.probability
                                 probabilityCount++
                             }
                         }
                     }
                     return Reading(
-                        decode(generated.drop(1), vocabulary),
+                        decode(generated, 1, generatedSize, vocabulary),
                         if (probabilityCount == 0) 0f else probabilitySum / probabilityCount,
                     )
                 }
@@ -205,39 +218,46 @@ internal object MangaOcrPageEngine {
         }
     }
 
-    private fun bestAllowedToken(logits: FloatArray, generated: List<Long>): Int {
+    private data class TokenChoice(val index: Int, val probability: Float)
+
+    private fun chooseToken(
+        logits: FloatArray,
+        generated: LongArray,
+        generatedSize: Int,
+        seenTrigrams: Map<Long, Set<Long>>,
+    ): TokenChoice {
+        val banned = if (generatedSize >= 2) {
+            seenTrigrams[pairKey(generated[generatedSize - 2], generated[generatedSize - 1])]
+        } else null
         var best = 0
+        var softmaxMax = Double.NEGATIVE_INFINITY
+        var softmaxSum = 0.0
         for (candidate in logits.indices) {
-            if (candidate == 0 || repeatsTrigram(generated, candidate.toLong())) continue
+            val value = logits[candidate].toDouble()
+            if (value > softmaxMax) {
+                softmaxSum = if (softmaxMax.isFinite()) {
+                    softmaxSum * exp(softmaxMax - value) + 1.0
+                } else 1.0
+                softmaxMax = value
+            } else {
+                softmaxSum += exp(value - softmaxMax)
+            }
+            if (candidate == 0 || banned?.contains(candidate.toLong()) == true) continue
             if (best == 0 || logits[candidate] > logits[best]) best = candidate
         }
-        return best
+        val probability = if (best == 0 || softmaxSum <= 0.0) 0f else
+            (exp(logits[best].toDouble() - softmaxMax) / softmaxSum).toFloat()
+        return TokenChoice(best, probability)
     }
 
-    private fun repeatsTrigram(generated: List<Long>, candidate: Long): Boolean {
-        if (generated.size < 4) return false
-        val first = generated[generated.lastIndex - 1]
-        val second = generated.last()
-        for (index in 0 until generated.size - 2) {
-            if (generated[index] == first && generated[index + 1] == second &&
-                generated[index + 2] == candidate
-            ) return true
-        }
-        return false
-    }
+    private fun pairKey(first: Long, second: Long): Long =
+        ((first and 0xffffffffL) shl 32) xor (second and 0xffffffffL)
 
-    private fun tokenProbability(logits: FloatArray, selected: Int): Float {
-        val maximum = logits.maxOrNull() ?: return 0f
-        var denominator = 0.0
-        logits.forEach { denominator += exp((it - maximum).toDouble()) }
-        return (exp((logits[selected] - maximum).toDouble()) / denominator.coerceAtLeast(1e-12)).toFloat()
-    }
-
-    private fun decode(ids: List<Long>, vocabulary: List<String>): String {
+    private fun decode(ids: LongArray, from: Int, to: Int, vocabulary: List<String>): String {
         val raw = buildString {
-            ids.forEach { id ->
-                val token = vocabulary.getOrNull(id.toInt()) ?: return@forEach
-                if (token.startsWith("[") && token.endsWith("]")) return@forEach
+            for (index in from until to) {
+                val token = vocabulary.getOrNull(ids[index].toInt()) ?: continue
+                if (token.startsWith("[") && token.endsWith("]")) continue
                 append(token.removePrefix("##"))
             }
         }

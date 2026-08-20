@@ -45,7 +45,7 @@ Your original import is never edited in place. Images export as PNG, PDF as PDF,
 
 ## Install
 
-The current release is **1.3.0**. Most physical Android phones want the **ARM64** APK; the x86_64 build is mainly for emulators.
+The current release is **3.0.0**. Most physical Android phones want the **ARM64** APK; the x86_64 build is mainly for emulators.
 
 Two editions are published per release:
 

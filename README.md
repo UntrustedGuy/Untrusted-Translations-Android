@@ -165,3 +165,5 @@ For exact licenses, copyright holders, model restrictions, upstream links, and s
 ## License
 
 The application source is available under [GNU GPL-3.0](LICENSE). Downloaded models, bundled libraries, fonts, and online services keep their own licenses and terms. The GPL does not remove NLLB's non-commercial restriction or grant rights to the comics you translate.
+
+

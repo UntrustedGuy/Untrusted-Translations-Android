@@ -84,6 +84,38 @@ import com.untrustedtranslations.android.R
 import com.untrustedtranslations.android.importer.ImportContract
 import com.untrustedtranslations.android.model.*
 import com.untrustedtranslations.android.processing.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.BorderStyle
+import androidx.compose.material.icons.filled.BrightnessMedium
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FontDownload
+import androidx.compose.material.icons.filled.FormatAlignCenter
+import androidx.compose.material.icons.filled.FormatAlignLeft
+import androidx.compose.material.icons.filled.FormatAlignRight
+import androidx.compose.material.icons.filled.FormatBold
+import androidx.compose.material.icons.filled.FormatColorFill
+import androidx.compose.material.icons.filled.FormatColorText
+import androidx.compose.material.icons.filled.FormatItalic
+import androidx.compose.material.icons.filled.FormatLineSpacing
+import androidx.compose.material.icons.filled.FormatShapes
+import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Title
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.lazy.grid.items
 import java.text.DateFormat
 import kotlin.math.roundToInt
 import java.util.Date
@@ -100,25 +132,53 @@ private val targetTags = listOf(
     "ur", "vi", "zh",
 )
 
-private val textColors = linkedMapOf(
+val unifiedColors = linkedMapOf<Long?, String>(
+    null to "Transparent",
     0xFF000000L to "Black",
     0xFFFFFFFFL to "White",
-    0xFFB91C1CL to "Red",
-    0xFF1D4ED8L to "Blue",
-    0xFFFACC15L to "Yellow",
+    0xFFE11D48L to "Comic Red",
+    0xFFEA580CL to "Action Orange",
+    0xFFFACC15L to "Electric Yellow",
+    0xFF22C55EL to "Neon Green",
+    0xFF06B6D4L to "Cyber Cyan",
+    0xFF2563EBL to "Royal Blue",
+    0xFF7C3AEDL to "Dark Violet",
+    0xFFDB2777L to "Hot Pink",
+    0xFFD97706L to "Warm Gold",
+    0xFF64748BL to "Slate Grey",
+    0xFF16A34AL to "Nature Green",
+    0xFF9333EAL to "Magic Purple"
+)
+
+val textColors = unifiedColors
+val outlineColors = unifiedColors
+val shadowColors = unifiedColors
+val backgroundColors = linkedMapOf(
+    null to "None",
+    0xFFFFFFFFL to "White",
+    0xFF000000L to "Black",
+    0xFFFFFBEBL to "Manga Paper",
+    0xDD18181BL to "Dark Glass",
+    0xFFFEF08AL to "Comic Yellow",
+    0xFFCFFAFEL to "Bubble Cyan",
+    0xFFFFE4E6L to "Bubble Rose",
 )
 
 private fun languageName(tag: String): String =
     Locale.forLanguageTag(tag).getDisplayLanguage(Locale.getDefault()).replaceFirstChar { it.titlecase() }
 
 @Composable
-fun TranslationApp(vm: TranslationViewModel = viewModel()) {
-    if (vm.screen == AppScreen.EDITOR) BackHandler(onBack = vm::saveAndCloseEditor)
+fun TranslationApp(vm: TranslationViewModel = androidx.lifecycle.viewmodel.compose.viewModel()) {
+    if (vm.screen == AppScreen.EDITOR) androidx.activity.compose.BackHandler(onBack = vm::saveAndCloseEditor)
+    if (vm.screen == AppScreen.ADD_PAGE) androidx.activity.compose.BackHandler(onBack = vm::closeAddPageScreen)
+    if (vm.screen == AppScreen.GALLERY) androidx.activity.compose.BackHandler(onBack = vm::closePageGallery)
     Box(Modifier.fillMaxSize().background(AppColors.Void)) {
         when (vm.screen) {
             AppScreen.IMPORT -> ImportScreen(vm)
             AppScreen.PAGE -> PageScreen(vm)
             AppScreen.EDITOR -> EditorScreen(vm)
+            AppScreen.ADD_PAGE -> AddPageScreen(vm)
+            AppScreen.GALLERY -> PageGalleryScreen(vm)
         }
         vm.busyMessage?.let { message -> BusyOverlay(message) }
     }
@@ -152,7 +212,6 @@ fun TranslationApp(vm: TranslationViewModel = viewModel()) {
 }
 
 @Composable
-
 private fun AiSettingsDialog(vm: TranslationViewModel) {
     val usesGemini =
         vm.ocrProvider == OcrProvider.GEMINI_FREE ||
@@ -428,51 +487,150 @@ private fun ModelPackCard(
 }
 
 @Composable
+private fun ColorSwatchRow(
+    selectedColor: Long?,
+    colors: Map<Long?, String>,
+    onSelect: (Long?) -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        colors.forEach { (colorValue, name) ->
+            val isSelected = selectedColor == colorValue
+            Surface(
+                onClick = { onSelect(colorValue) },
+                shape = RoundedCornerShape(12.dp),
+                color = if (isSelected) AppColors.SurfaceRaised else Color.Transparent,
+                border = androidx.compose.foundation.BorderStroke(
+                    width = if (isSelected) 2.dp else 1.dp,
+                    color = if (isSelected) AppColors.Cyan else Color(0xFF343240),
+                ),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (colorValue != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .background(Color(colorValue.toInt()), CircleShape)
+                                .border(1.dp, Color(0x40FFFFFF), CircleShape),
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .border(1.dp, Color(0x60FFFFFF), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("∅", fontSize = 11.sp, color = AppColors.Muted)
+                        }
+                    }
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSelected) AppColors.Text else AppColors.Muted,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun AddTextDialog(vm: TranslationViewModel) {
     AlertDialog(
         onDismissRequest = vm::dismissAddTextEditor,
-        title = { Text("Add text") },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Add, null, tint = AppColors.Cyan)
+                Text("Add Custom Text")
+            }
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
                 OutlinedTextField(
                     value = vm.manualTextDraft,
                     onValueChange = vm::updateManualText,
-                    label = { Text("Text") },
-                    minLines = 3,
+                    label = { Text("Your text / lettering") },
+                    placeholder = { Text("Enter dialogue, sound effect, or caption...") },
+                    minLines = 2,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(
-                    "Font: Manga (Comic Neue Bold)",
-                    color = AppColors.Cyan,
-                    fontWeight = FontWeight.Bold,
+
+                // Quick Case Shortcuts
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(onClick = { vm.transformManualTextCase(0) }, modifier = Modifier.weight(1f)) {
+                        Text("ALL CAPS", style = MaterialTheme.typography.labelSmall)
+                    }
+                    OutlinedButton(onClick = { vm.transformManualTextCase(2) }, modifier = Modifier.weight(1f)) {
+                        Text("Title Case", style = MaterialTheme.typography.labelSmall)
+                    }
+                    OutlinedButton(onClick = { vm.transformManualTextCase(1) }, modifier = Modifier.weight(1f)) {
+                        Text("lower", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+
+                // Font Family Selector
+                Text("Font Family", color = AppColors.Cyan, style = MaterialTheme.typography.labelMedium)
+                Selector("Font", vm.manualFontDraft.label, FontChoice.entries.map { it.label }) { label ->
+                    vm.updateManualFont(FontChoice.entries.first { it.label == label })
+                }
+
+                // Text Color Swatches
+                Text("Text Color", color = AppColors.Cyan, style = MaterialTheme.typography.labelMedium)
+                ColorSwatchRow(
+                    selectedColor = vm.manualTextColorArgb,
+                    colors = textColors,
+                    onSelect = { it?.let(vm::updateManualTextColor) },
                 )
-                Text("Background", color = AppColors.Muted)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                // Outline / Stroke
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("Outline", color = AppColors.Muted, style = MaterialTheme.typography.labelMedium)
                     FilterChip(
-                        selected = vm.manualBackgroundArgb == null,
-                        onClick = { vm.updateManualBackground(null) },
-                        label = { Text("None") },
-                    )
-                    FilterChip(
-                        selected = vm.manualBackgroundArgb == 0xFFFFFFFFL,
-                        onClick = { vm.updateManualBackground(0xFFFFFFFFL) },
-                        label = { Text("White") },
-                    )
-                    FilterChip(
-                        selected = vm.manualBackgroundArgb == 0xFF000000L,
-                        onClick = { vm.updateManualBackground(0xFF000000L) },
-                        label = { Text("Black") },
+                        selected = vm.manualStrokeWidth > 0f,
+                        onClick = { vm.updateManualStrokeWidth(if (vm.manualStrokeWidth > 0f) 0f else 3f) },
+                        label = { Text(if (vm.manualStrokeWidth > 0f) "Enabled (3sp)" else "None") },
                     )
                 }
+
+                // Background Badge
+                Text("Speech Bubble / Badge Background", color = AppColors.Cyan, style = MaterialTheme.typography.labelMedium)
+                ColorSwatchRow(
+                    selectedColor = vm.manualBackgroundArgb,
+                    colors = backgroundColors,
+                    onSelect = vm::updateManualBackground,
+                )
+
                 Text(
-                    "Added text starts in the page center. Move, resize, or rotate it directly on the page.",
+                    "Added text starts in the page center. You can move, resize, rotate, or bend it directly on the page.",
                     color = AppColors.Muted,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
         },
         confirmButton = {
-            Button(vm::confirmAddText, enabled = vm.manualTextDraft.isNotBlank()) { Text("Add") }
+            Button(vm::confirmAddText, enabled = vm.manualTextDraft.isNotBlank()) {
+                Icon(Icons.Default.Check, null)
+                Spacer(Modifier.width(6.dp))
+                Text("Add to Page")
+            }
         },
         dismissButton = {
             TextButton(vm::dismissAddTextEditor) { Text("Cancel") }
@@ -667,7 +825,6 @@ private fun Selector(label: String, value: String, options: List<String>, onSele
 private fun PageScreen(vm: TranslationViewModel) {
     val project = vm.project ?: return
     val page = vm.currentPage ?: return
-    var transformMode by remember(page.id) { mutableStateOf(PageTransformMode.RESIZE) }
     Scaffold(
         containerColor = AppColors.Void,
         topBar = {
@@ -689,9 +846,16 @@ private fun PageScreen(vm: TranslationViewModel) {
                     }
                 },
                 actions = {
-                    IconButton(vm::undo, enabled = vm.canUndo) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
+                                        IconButton(vm::undo, enabled = vm.canUndo) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
                     IconButton(vm::redo, enabled = vm.canRedo) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo") }
+                    IconButton(vm::openPageGallery) { Icon(Icons.Default.GridView, "Skip to page") }
                     IconButton(vm::openAiSettings) { Icon(Icons.Default.Settings, "AI and OCR settings") }
+                    if (vm.isLastPage) {
+                        IconButton(vm::saveAndExit) { Icon(Icons.Default.SaveAlt, "Export manga") }
+                    }
+                    if (vm.selectedBlockIndex >= 0 && vm.currentPage?.blocks?.getOrNull(vm.selectedBlockIndex)?.originalText?.isEmpty() == true) {
+                        IconButton(vm::deleteCurrentBlock) { Icon(Icons.Default.Delete, "Delete block") }
+                    }
                     Spacer(Modifier.width(8.dp))
                 },
             )
@@ -704,25 +868,11 @@ private fun PageScreen(vm: TranslationViewModel) {
             ManipulablePagePreview(
                 page = page,
                 selectedBlockIndex = vm.selectedBlockIndex,
-                mode = transformMode,
                 onSelectBlock = vm::selectBlock,
+                onDeselectAll = vm::onDeselectAll,
                 onTransformCommitted = vm::commitPageTransform,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = transformMode == PageTransformMode.RESIZE,
-                    onClick = { transformMode = PageTransformMode.RESIZE },
-                    label = { Text("Move / Resize") },
-                    enabled = page.blocks.any { it.applied },
-                )
-                FilterChip(
-                    selected = transformMode == PageTransformMode.ROTATE,
-                    onClick = { transformMode = PageTransformMode.ROTATE },
-                    label = { Text("Move / Rotate") },
-                    enabled = page.blocks.any { it.applied },
-                )
-            }
             val selectedBlock = page.blocks.getOrNull(vm.selectedBlockIndex)
             if (selectedBlock?.applied == true) {
                 val committedPercent = (selectedBlock.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100)
@@ -757,11 +907,7 @@ private fun PageScreen(vm: TranslationViewModel) {
                 }
             }
             Text(
-                if (transformMode == PageTransformMode.RESIZE) {
-                    "Pinch the selected text to resize it live; pinch anywhere else to zoom the page. Drag text to move; edge handles resize the box."
-                } else {
-                    "Pinch empty page area to zoom. Tap applied text. Drag inside to move; drag the round handle above it to rotate."
-                },
+                "Pinch to zoom canvas or scale/rotate text. Drag to move; use corner handles to resize.",
                 color = AppColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -777,18 +923,18 @@ private fun PageScreen(vm: TranslationViewModel) {
                     vm::previousPage,
                     modifier = Modifier.weight(1f),
                     enabled = project.currentPageIndex > 0 && !vm.placementUpdating,
-                ) { Text("Previous page") }
+                ) { Text("Previous") }
                 OutlinedButton(
-                    vm::save,
-                    modifier = Modifier.weight(1f),
+                    vm::saveAndExitProject,
+                    modifier = Modifier.weight(1.2f),
                     enabled = !vm.placementUpdating,
-                ) { Text("Save page") }
+                ) { Text("Save & Exit") }
                 Button(
-                    onClick = { if (vm.isLastPage) vm.saveAndExit() else vm.saveAndNext() },
-                    modifier = Modifier.weight(1f),
-                    enabled = !vm.placementUpdating,
+                    onClick = vm::saveAndNext,
+                    modifier = Modifier.weight(1.2f),
+                    enabled = !vm.isLastPage && !vm.placementUpdating,
                 ) {
-                    Text(if (vm.isLastPage) "Save & Exit" else "Save & Next")
+                    Text("Save & Next")
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -847,11 +993,87 @@ private fun PagePreview(page: ComicPage, modifier: Modifier = Modifier) {
     }
 }
 
+private enum class EditorTab(val label: String, val icon: ImageVector) {
+    TEXT("Text", Icons.Default.TextFields),
+    FONT("Font", Icons.Default.FontDownload),
+    COLOR("Color", Icons.Default.Palette),
+    HIGHLIGHT("Highlight", Icons.Default.FormatColorFill),
+    OUTLINE("Outline", Icons.Default.BorderStyle),
+    SHADOW("Shadow", Icons.Default.BrightnessMedium),
+    SPACING("Spacing", Icons.Default.FormatLineSpacing),
+    CURVE("Curve", Icons.Default.Refresh),
+    THREE_D("3D", Icons.Default.ViewInAr),
+    BACKGROUND("Badge", Icons.Default.Layers),
+    LAYERS("Layers", Icons.Default.FilterNone),
+    STYLES("Styles", Icons.Default.Style),
+}
+
+@Composable
+private fun TextWysiwygPreviewCard(
+    block: TextBlock,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val mangaFont = remember {
+        FontFamily(android.graphics.Typeface.createFromAsset(context.assets, "fonts/comic_neue_bold.ttf"))
+    }
+    Surface(
+        color = AppColors.SurfaceRaised,
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF343240)),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+        ) {
+            val bgArgb = block.style.backgroundColorArgb
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .background(
+                        color = if (bgArgb != null) {
+                            Color(bgArgb.toInt()).copy(alpha = block.style.backgroundOpacity)
+                        } else Color.Transparent,
+                        shape = RoundedCornerShape(block.style.backgroundCornerRadiusDp.dp),
+                    )
+                    .padding(block.style.backgroundPaddingDp.dp),
+            ) {
+                Text(
+                    text = if (block.style.vertical) {
+                        block.translatedText.ifBlank { "Sample" }.lines().joinToString("\n") { line ->
+                            line.trim().toCharArray().joinToString("\n")
+                        }
+                    } else {
+                        block.translatedText.ifBlank { "Live Typography Preview" }
+                    },
+                    color = Color(block.style.textColorArgb.toInt()).copy(alpha = block.style.textOpacity),
+                    fontSize = (block.style.fontSizeSp.coerceIn(12f, 38f)).sp,
+                    letterSpacing = (block.style.letterSpacingEm * 14).sp,
+                    lineHeight = (block.style.fontSizeSp.coerceIn(12f, 38f) * block.style.lineSpacingMultiplier).sp,
+                    fontFamily = getFontFamily(block.style.font),
+                    fontWeight = if (block.style.bold || block.style.font == FontChoice.ACTION || block.style.font == FontChoice.GOTHIC) FontWeight.Bold else FontWeight.Normal,
+                    fontStyle = if (block.style.italic) FontStyle.Italic else FontStyle.Normal,
+                    textAlign = when (block.style.alignment) {
+                        TextAlignmentChoice.START -> TextAlign.Start
+                        TextAlignmentChoice.CENTER -> TextAlign.Center
+                        TextAlignmentChoice.END -> TextAlign.End
+                    },
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EditorScreen(vm: TranslationViewModel) {
     val page = vm.currentPage ?: return
     val block = vm.currentBlock ?: return
+    var currentTab by remember { mutableStateOf(EditorTab.TEXT) }
+
     Scaffold(
         containerColor = AppColors.Void,
         topBar = {
@@ -867,90 +1089,414 @@ private fun EditorScreen(vm: TranslationViewModel) {
         },
     ) { padding ->
         Column(
-            Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()),
+            Modifier
+                .padding(padding)
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("ORIGINAL OCR — EDIT IF DETECTION IS WRONG", color = AppColors.Muted, style = MaterialTheme.typography.labelMedium)
-            OutlinedTextField(
-                value = block.originalText,
-                onValueChange = vm::updateOriginal,
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 2,
-            )
-            OutlinedButton(vm::translateCurrentBlock, Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Refresh, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Translate this text again")
-            }
-            Text("TRANSLATION — EDIT BEFORE APPLYING", color = AppColors.Cyan, style = MaterialTheme.typography.labelMedium)
-            OutlinedTextField(
-                value = block.translatedText,
-                onValueChange = vm::updateTranslation,
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
-            )
-            Selector("Font", block.style.font.label, FontChoice.entries.map { it.label }) { label ->
-                vm.updateFont(FontChoice.entries.first { it.label == label })
-            }
-            Text("Text size: ${(block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).roundToInt()}%")
+            // Live WYSIWYG Typography Preview
+            TextWysiwygPreviewCard(block = block)
+
+            // Category Tabs
             Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Slider(
-                    value = (block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).coerceIn(25f, 400f),
-                    onValueChange = { vm.updateFontSize(BASE_TEXT_SIZE_SP * it / 100f) },
-                    valueRange = 25f..400f,
-                    modifier = Modifier.weight(1f),
-                )
-                TextSizeField(
-                    percent = (block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).coerceIn(25f, 400f),
-                    onCommit = { vm.updateFontSize(BASE_TEXT_SIZE_SP * it / 100f) },
-                )
+                EditorTab.entries.forEach { tab ->
+                    FilterChip(
+                        selected = currentTab == tab,
+                        onClick = { currentTab = tab },
+                        label = { Text(tab.label) },
+                        leadingIcon = { Icon(tab.icon, null, modifier = Modifier.size(16.dp)) },
+                    )
+                }
             }
-            Selector("Alignment", block.style.alignment.label, TextAlignmentChoice.entries.map { it.label }) { label ->
-                vm.updateAlignment(TextAlignmentChoice.entries.first { it.label == label })
-            }
-            Selector("Text color", textColors.getValue(block.style.textColorArgb), textColors.values.toList()) { label ->
-                vm.updateTextColor(textColors.entries.first { it.value == label }.key)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(block.style.bold, { vm.updateBold(!block.style.bold) }, { Text("Bold") })
-                FilterChip(block.style.italic, { vm.updateItalic(!block.style.italic) }, { Text("Italic") })
-                FilterChip(block.style.vertical, { vm.updateVertical(!block.style.vertical) }, { Text("Vertical") })
-            }
-            Text(
-                "Automatic manga formatting is the default. These controls are optional; size, position, and rotation remain adjustable on the page.",
-                color = AppColors.Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Surface(
-                color = AppColors.SurfaceRaised,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth(),
+
+            // Tab Content Panels
+            Card(
+                colors = CardDefaults.cardColors(containerColor = AppColors.SurfaceRaised),
+                shape = RoundedCornerShape(16.dp),
             ) {
-                Text(
-                    block.translatedText.ifBlank { "Translation preview" },
-                    fontSize = block.style.fontSizeSp.coerceAtMost(48f).sp,
-                    modifier = Modifier.padding(20.dp),
-                    color = AppColors.Text,
-                )
+                Column(
+                    Modifier.fillMaxWidth().padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    when (currentTab) {
+                        EditorTab.TEXT -> {
+                            Text("ORIGINAL OCR", color = AppColors.Muted, style = MaterialTheme.typography.labelSmall)
+                            OutlinedTextField(
+                                value = block.originalText,
+                                onValueChange = vm::updateOriginal,
+                                modifier = Modifier.fillMaxWidth(),
+                                minLines = 2,
+                            )
+                            OutlinedButton(vm::translateCurrentBlock, Modifier.fillMaxWidth()) {
+                                Icon(Icons.Default.Refresh, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Translate this text again")
+                            }
+                            Text("TRANSLATED TEXT", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            OutlinedTextField(
+                                value = block.translatedText,
+                                onValueChange = vm::updateTranslation,
+                                modifier = Modifier.fillMaxWidth(),
+                                minLines = 2,
+                            )
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton({ vm.updateTextCase(0) }, Modifier.weight(1f)) {
+                                    Text("ALL CAPS", style = MaterialTheme.typography.labelSmall)
+                                }
+                                OutlinedButton({ vm.updateTextCase(2) }, Modifier.weight(1f)) {
+                                    Text("Title Case", style = MaterialTheme.typography.labelSmall)
+                                }
+                                OutlinedButton({ vm.updateTextCase(1) }, Modifier.weight(1f)) {
+                                    Text("lower", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            FilterChip(
+                                selected = block.style.vertical,
+                                onClick = { vm.updateVertical(!block.style.vertical) },
+                                label = { Text("Vertical Text (Manga / Webtoon)") },
+                            )
+                        }
+
+                        EditorTab.FONT -> {
+                            Text("CHOOSE TYPEFACE", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            FontChoice.entries.forEach { font ->
+                                val isSelected = block.style.font == font
+                                Surface(
+                                    onClick = { vm.updateFont(font) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) Color(0xFF262338) else Color.Transparent,
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        if (isSelected) AppColors.Cyan else Color(0xFF343240),
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Row(
+                                        Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        Text(
+                                            font.label,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSelected) AppColors.Cyan else AppColors.Text,
+                                        )
+                                        Text(
+                                            "ABC 123",
+                                            color = if (isSelected) AppColors.Cyan else AppColors.Muted,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        EditorTab.COLOR -> {
+                            Text("TEXT COLOR", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            ColorSwatchRow(
+                                selectedColor = block.style.textColorArgb,
+                                colors = textColors,
+                                onSelect = { it?.let(vm::updateTextColor) },
+                            )
+                            ValueSlider(
+                                label = "Text Opacity",
+                                value = (block.style.textOpacity * 100).roundToInt().toFloat(),
+                                range = 10f..100f,
+                                suffix = "%",
+                                onChange = { vm.updateTextOpacity(it / 100f) },
+                            )
+                        }
+
+                        EditorTab.OUTLINE -> {
+                            Text("STROKE / OUTLINE", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            ValueSlider(
+                                label = "Outline Width",
+                                value = block.style.strokeWidthSp,
+                                range = 0f..16f,
+                                suffix = "sp",
+                                onChange = vm::updateStrokeWidth,
+                            )
+                            Text("OUTLINE COLOR", color = AppColors.Muted, style = MaterialTheme.typography.labelSmall)
+                            ColorSwatchRow(
+                                selectedColor = block.style.strokeColorArgb,
+                                colors = outlineColors,
+                                onSelect = { it?.let(vm::updateStrokeColor) },
+                            )
+                            if (block.style.strokeWidthSp > 0f) {
+                                TextButton({ vm.updateStrokeWidth(0f) }, modifier = Modifier.align(Alignment.End)) {
+                                    Text("Remove Outline", color = AppColors.Coral)
+                                }
+                            }
+                        }
+
+                        EditorTab.SHADOW -> {
+                            Text("SHADOW & NEON GLOW", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            ValueSlider(
+                                label = "Shadow Blur / Glow",
+                                value = block.style.shadowBlurRadiusSp,
+                                range = 0f..24f,
+                                suffix = "sp",
+                                onChange = vm::updateShadowBlur,
+                            )
+                            ValueSlider(
+                                label = "Shadow X Offset",
+                                value = block.style.shadowDxSp,
+                                range = -20f..20f,
+                                suffix = "sp",
+                                onChange = vm::updateShadowDx,
+                            )
+                            ValueSlider(
+                                label = "Shadow Y Offset",
+                                value = block.style.shadowDySp,
+                                range = -20f..20f,
+                                suffix = "sp",
+                                onChange = vm::updateShadowDy,
+                            )
+                            Text("SHADOW / GLOW COLOR", color = AppColors.Muted, style = MaterialTheme.typography.labelSmall)
+                            ColorSwatchRow(
+                                selectedColor = block.style.shadowColorArgb,
+                                colors = shadowColors,
+                                onSelect = { it?.let(vm::updateShadowColor) },
+                            )
+                            if (block.style.shadowBlurRadiusSp > 0f || block.style.shadowDxSp != 0f || block.style.shadowDySp != 0f) {
+                                TextButton(
+                                    onClick = {
+                                        vm.updateShadowBlur(0f)
+                                        vm.updateShadowDx(0f)
+                                        vm.updateShadowDy(0f)
+                                    },
+                                    modifier = Modifier.align(Alignment.End),
+                                ) {
+                                    Text("Reset Shadow", color = AppColors.Coral)
+                                }
+                            }
+                        }
+
+                        EditorTab.SPACING -> {
+                            Text("TEXT SIZE & SPACING", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Text("Size: ${(block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).roundToInt()}%", modifier = Modifier.weight(1f))
+                                TextSizeField(
+                                    percent = (block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).coerceIn(25f, 400f),
+                                    onCommit = { vm.updateFontSize(BASE_TEXT_SIZE_SP * it / 100f) },
+                                )
+                            }
+                            Slider(
+                                value = (block.style.fontSizeSp / BASE_TEXT_SIZE_SP * 100).coerceIn(25f, 400f),
+                                onValueChange = { vm.updateFontSize(BASE_TEXT_SIZE_SP * it / 100f) },
+                                valueRange = 25f..400f,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            ValueSlider(
+                                label = "Letter Spacing (Kerning)",
+                                value = (block.style.letterSpacingEm * 100).roundToInt().toFloat(),
+                                range = -5f..35f,
+                                suffix = "%",
+                                onChange = { vm.updateLetterSpacing(it / 100f) },
+                            )
+                            ValueSlider(
+                                label = "Line Height (Leading)",
+                                value = (block.style.lineSpacingMultiplier * 100).roundToInt().toFloat(),
+                                range = 70f..200f,
+                                suffix = "%",
+                                onChange = { vm.updateLineSpacing(it / 100f) },
+                            )
+                            Text("ALIGNMENT & STYLE", color = AppColors.Muted, style = MaterialTheme.typography.labelSmall)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FilterChip(
+                                    selected = block.style.alignment == TextAlignmentChoice.START,
+                                    onClick = { vm.updateAlignment(TextAlignmentChoice.START) },
+                                    label = { Text("Left") },
+                                    leadingIcon = { Icon(Icons.Default.FormatAlignLeft, null, modifier = Modifier.size(16.dp)) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                                FilterChip(
+                                    selected = block.style.alignment == TextAlignmentChoice.CENTER,
+                                    onClick = { vm.updateAlignment(TextAlignmentChoice.CENTER) },
+                                    label = { Text("Center") },
+                                    leadingIcon = { Icon(Icons.Default.FormatAlignCenter, null, modifier = Modifier.size(16.dp)) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                                FilterChip(
+                                    selected = block.style.alignment == TextAlignmentChoice.END,
+                                    onClick = { vm.updateAlignment(TextAlignmentChoice.END) },
+                                    label = { Text("Right") },
+                                    leadingIcon = { Icon(Icons.Default.FormatAlignRight, null, modifier = Modifier.size(16.dp)) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = block.style.bold,
+                                    onClick = { vm.updateBold(!block.style.bold) },
+                                    label = { Text("Bold") },
+                                    leadingIcon = { Icon(Icons.Default.FormatBold, null, modifier = Modifier.size(16.dp)) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                                FilterChip(
+                                    selected = block.style.italic,
+                                    onClick = { vm.updateItalic(!block.style.italic) },
+                                    label = { Text("Italic") },
+                                    leadingIcon = { Icon(Icons.Default.FormatItalic, null, modifier = Modifier.size(16.dp)) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+
+                        EditorTab.CURVE -> {
+                            Text("ARC & CURVED TEXT", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            ValueSlider(
+                                label = "Arc Bend Angle",
+                                value = block.style.curveSweepAngle,
+                                range = -180f..180f,
+                                suffix = "°",
+                                onChange = vm::updateCurveAngle,
+                            )
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton({ vm.updateCurveAngle(0f) }, Modifier.weight(1f)) {
+                                    Text("Straight (0°)", style = MaterialTheme.typography.labelSmall)
+                                }
+                                OutlinedButton({ vm.updateCurveAngle(60f) }, Modifier.weight(1f)) {
+                                    Text("Arch Up (+60°)", style = MaterialTheme.typography.labelSmall)
+                                }
+                                OutlinedButton({ vm.updateCurveAngle(-60f) }, Modifier.weight(1f)) {
+                                    Text("Arch Down (-60°)", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+
+                        EditorTab.BACKGROUND -> {
+                            Text("SPEECH BUBBLE & BADGE BACKGROUND", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            ColorSwatchRow(
+                                selectedColor = block.style.backgroundColorArgb,
+                                colors = backgroundColors,
+                                onSelect = vm::updateBackgroundColor,
+                            )
+                            ValueSlider(
+                                label = "Background Opacity",
+                                value = (block.style.backgroundOpacity * 100).roundToInt().toFloat(),
+                                range = 10f..100f,
+                                suffix = "%",
+                                onChange = { vm.updateBackgroundOpacity(it / 100f) },
+                            )
+                            ValueSlider(
+                                label = "Corner Radius",
+                                value = block.style.backgroundCornerRadiusDp,
+                                range = 0f..32f,
+                                suffix = "dp",
+                                onChange = vm::updateBackgroundRadius,
+                            )
+                            ValueSlider(
+                                label = "Padding",
+                                value = block.style.backgroundPaddingDp,
+                                range = 0f..24f,
+                                suffix = "dp",
+                                onChange = vm::updateBackgroundPadding,
+                            )
+                        }
+
+                        EditorTab.HIGHLIGHT -> {
+                            Text("TEXT HIGHLIGHT", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            ColorSwatchRow(
+                                selectedColor = block.style.highlightColorArgb,
+                                colors = backgroundColors,
+                                onSelect = vm::updateHighlightColor,
+                            )
+                            if (block.style.highlightColorArgb != null) {
+                                TextButton({ vm.updateHighlightColor(null) }, modifier = Modifier.align(Alignment.End)) {
+                                    Text("Remove Highlight", color = AppColors.Coral)
+                                }
+                            }
+                        }
+
+                        EditorTab.THREE_D -> {
+                            Text("3D PERSPECTIVE (TILT)", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            ValueSlider(
+                                label = "X-Axis Tilt (Up/Down)",
+                                value = block.style.perspective3dX,
+                                range = -80f..80f,
+                                suffix = "°",
+                                onChange = vm::updatePerspective3dX,
+                            )
+                            ValueSlider(
+                                label = "Y-Axis Tilt (Left/Right)",
+                                value = block.style.perspective3dY,
+                                range = -80f..80f,
+                                suffix = "°",
+                                onChange = vm::updatePerspective3dY,
+                            )
+                            if (block.style.perspective3dX != 0f || block.style.perspective3dY != 0f) {
+                                TextButton(
+                                    onClick = { vm.updatePerspective3dX(0f); vm.updatePerspective3dY(0f) },
+                                    modifier = Modifier.align(Alignment.End),
+                                ) {
+                                    Text("Reset 3D", color = AppColors.Coral)
+                                }
+                            }
+                        }
+
+                        EditorTab.LAYERS -> {
+                            Text("LAYER POSITIONING", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("Z-Index (Order):", color = AppColors.Text, modifier = Modifier.weight(1f))
+                                IconButton(onClick = { vm.updateZIndex(block.style.zIndex - 1) }) { Icon(Icons.Default.Remove, "Bring down") }
+                                Text("${block.style.zIndex}", color = AppColors.Cyan, fontWeight = FontWeight.Bold)
+                                IconButton(onClick = { vm.updateZIndex(block.style.zIndex + 1) }) { Icon(Icons.Default.Add, "Bring up") }
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = block.style.locked,
+                                    onClick = { vm.updateLocked(!block.style.locked) },
+                                    label = { Text(if (block.style.locked) "Locked" else "Unlocked") },
+                                    leadingIcon = { Icon(if (block.style.locked) Icons.Default.Lock else Icons.Default.LockOpen, null, modifier = Modifier.size(16.dp)) },
+                                )
+                                FilterChip(
+                                    selected = block.style.visible,
+                                    onClick = { vm.updateVisible(!block.style.visible) },
+                                    label = { Text(if (block.style.visible) "Visible" else "Hidden") },
+                                    leadingIcon = { Icon(if (block.style.visible) Icons.Default.Visibility else Icons.Default.VisibilityOff, null, modifier = Modifier.size(16.dp)) },
+                                )
+                            }
+                        }
+
+                        EditorTab.STYLES -> {
+                            Text("SAVED STYLES", color = AppColors.Cyan, style = MaterialTheme.typography.labelSmall)
+                            Text("Style presets would appear here.", color = AppColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
             }
-            Button(vm::applyBlock, Modifier.fillMaxWidth().height(54.dp), enabled = block.translatedText.isNotBlank()) {
+
+                        Button(
+                onClick = vm::applyBlock,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                enabled = block.translatedText.isNotBlank(),
+            ) {
                 if (block.applied) {
                     Icon(Icons.Default.Check, null)
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(if (block.applied) "Apply changes again" else "Replace original text on page")
             }
-            if (vm.isLastEditorBlock) {
-                Button(
-                    vm::saveAndCloseEditor,
-                    modifier = Modifier.fillMaxWidth().height(54.dp),
-                    enabled = block.applied,
-                ) { Text("Save page & close editor") }
+
+            Button(
+                onClick = vm::saveAndCloseEditor,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                enabled = block.translatedText.isNotBlank(),
+            ) {
+                Text("Save page & close editor")
             }
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(vm::previousBlock, enabled = vm.editorPosition > 0, modifier = Modifier.weight(1f)) {
                     Text("Previous")
@@ -959,7 +1505,9 @@ private fun EditorScreen(vm: TranslationViewModel) {
                     vm::nextBlock,
                     enabled = vm.editorPosition < vm.editorBlockCount - 1,
                     modifier = Modifier.weight(1f),
-                ) { Text("Next text") }
+                ) {
+                    Text("Next text")
+                }
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -1005,6 +1553,186 @@ private fun ValueSlider(
     onChange: (Float) -> Unit,
 ) {
     val shown = if (suffix == "%") (value * 100).toInt() else value.toInt()
-    Text("$label: $shown$suffix")
+    Text("$label: $shown$suffix", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
     Slider(value = value.coerceIn(range), onValueChange = onChange, valueRange = range)
+}
+
+
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddPageScreen(vm: TranslationViewModel) {
+    val docLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) vm.appendDocument(uri)
+    }
+
+    Scaffold(
+        containerColor = AppColors.Void,
+        topBar = {
+            TopAppBar(
+                title = { Text("Add Another Page") },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = AppColors.Void),
+                navigationIcon = {
+                    IconButton(vm::closeAddPageScreen) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Go back")
+                    }
+                },
+            )
+        }
+    ) { padding ->
+        Column(
+            Modifier.padding(padding).padding(16.dp).fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Card(
+                onClick = { docLauncher.launch(arrayOf("image/*", "application/pdf")) },
+                colors = CardDefaults.cardColors(containerColor = AppColors.SurfaceRaised),
+                modifier = Modifier.fillMaxWidth().height(100.dp)
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Add, null)
+                        Text("Add from Gallery")
+                    }
+                }
+            }
+
+            Text("Solid Background", color = AppColors.Muted, style = MaterialTheme.typography.labelMedium)
+            
+            val backgroundColors = linkedMapOf<Long?, String>(
+                null to "Transparent",
+                0xFF000000L to "Black",
+                0xFFFFFFFFL to "White",
+                0xFFE11D48L to "Comic Red",
+                0xFF2563EBL to "Manga Blue",
+                0xFF16A34AL to "Nature Green",
+                0xFFD97706L to "Sunset Orange",
+                0xFF9333EAL to "Magic Purple"
+            )
+
+            androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(80.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(backgroundColors.toList()) { (colorArgb, name) ->
+                    val isTransparent = colorArgb == null
+                    Card(
+                        onClick = { vm.appendBlankPage(colorArgb) },
+                        modifier = Modifier.height(80.dp).fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = if (isTransparent) AppColors.Surface else androidx.compose.ui.graphics.Color(colorArgb!!)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color(0xFF4B4759))
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                            Text(
+                                name, 
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isTransparent || colorArgb == 0xFFFFFFFFL) AppColors.Void else AppColors.Text,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PageGalleryScreen(vm: TranslationViewModel) {
+    val project = vm.project ?: return
+    
+    Scaffold(
+        containerColor = AppColors.Void,
+        topBar = {
+            TopAppBar(
+                title = { Text("Jump to Page") },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = AppColors.Void),
+                navigationIcon = {
+                    IconButton(vm::closePageGallery) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Go back")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(100.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(padding).fillMaxSize()
+        ) {
+            items(project.pages.size) { index ->
+                Card(
+                    onClick = { vm.jumpToPage(index) },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (index == project.currentPageIndex) AppColors.SurfaceRaised else AppColors.Surface
+                    ),
+                    modifier = Modifier.height(140.dp).fillMaxWidth(),
+                    border = androidx.compose.foundation.BorderStroke(
+                        if (index == project.currentPageIndex) 2.dp else 1.dp, 
+                        if (index == project.currentPageIndex) AppColors.Cyan else androidx.compose.ui.graphics.Color(0xFF4B4759)
+                    )
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                            Text("${index + 1}", style = MaterialTheme.typography.displaySmall, color = AppColors.Text)
+                            if (project.pages[index].processed) {
+                                Spacer(Modifier.height(4.dp))
+                                Icon(Icons.Default.Check, "Processed", tint = AppColors.Cyan, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@Composable
+fun getFontFamily(font: FontChoice): androidx.compose.ui.text.font.FontFamily {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return androidx.compose.runtime.remember(font) {
+        when (font) {
+            FontChoice.AUTO, FontChoice.SANS -> androidx.compose.ui.text.font.FontFamily.Default
+            FontChoice.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
+            FontChoice.CONDENSED -> androidx.compose.ui.text.font.FontFamily(android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.NORMAL))
+            FontChoice.MONOSPACE -> androidx.compose.ui.text.font.FontFamily.Monospace
+            FontChoice.CASUAL -> androidx.compose.ui.text.font.FontFamily(android.graphics.Typeface.create("casual", android.graphics.Typeface.NORMAL))
+            FontChoice.MANGA -> androidx.compose.ui.text.font.FontFamily(android.graphics.Typeface.createFromAsset(context.assets, "fonts/comic_neue_bold.ttf"))
+            FontChoice.ACTION -> androidx.compose.ui.text.font.FontFamily(android.graphics.Typeface.create("sans-serif-black", android.graphics.Typeface.BOLD))
+            FontChoice.GOTHIC -> androidx.compose.ui.text.font.FontFamily.Serif
+            FontChoice.VINTAGE -> androidx.compose.ui.text.font.FontFamily(android.graphics.Typeface.create("cursive", android.graphics.Typeface.NORMAL))
+            FontChoice.CUSTOM -> {
+                val customFile = java.io.File(context.filesDir, "custom_font.ttf")
+                if (customFile.exists()) androidx.compose.ui.text.font.FontFamily(android.graphics.Typeface.createFromFile(customFile)) else androidx.compose.ui.text.font.FontFamily.Default
+            }
+            else -> androidx.compose.ui.text.font.FontFamily.Default
+        }
+    }
 }

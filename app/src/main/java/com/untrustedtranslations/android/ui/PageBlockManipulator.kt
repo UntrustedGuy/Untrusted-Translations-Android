@@ -2,6 +2,9 @@ package com.untrustedtranslations.android.ui
 
 import android.graphics.BitmapFactory
 import android.graphics.Typeface
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -10,8 +13,10 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateRotation
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -35,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,16 +55,20 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -70,23 +80,22 @@ import com.untrustedtranslations.android.processing.PageRenderer
 import kotlin.math.atan2
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.abs
+import kotlin.math.PI
 
-enum class PageTransformMode { RESIZE, ROTATE }
-
-private enum class PageDragHandle { NONE, MOVE, LEFT, TOP, RIGHT, BOTTOM, ROTATE }
+private enum class DragTarget { NONE, MOVE, CORNER_TL, CORNER_TR, CORNER_BL, CORNER_BR, ROTATE, PAN }
 
 @Composable
 fun ManipulablePagePreview(
     page: ComicPage,
     selectedBlockIndex: Int,
-    mode: PageTransformMode,
     onSelectBlock: (Int) -> Unit,
+    onDeselectAll: () -> Unit,
     onTransformCommitted: (Int, RelativeBounds, Float, Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Keyed by page id, not the rendered file: when a re-render lands we keep showing the
-    // previous bitmap (plus the live draft overlay) until the new one is decoded, so the
-    // page never blanks or snaps while the background renderer catches up.
     var bitmap by remember(page.id) { mutableStateOf<android.graphics.Bitmap?>(null) }
     val context = LocalContext.current
     var previewPending by remember(page.id) { mutableStateOf(false) }
@@ -101,8 +110,12 @@ fun ManipulablePagePreview(
         FontFamily(Typeface.createFromAsset(context.assets, "fonts/comic_neue_bold.ttf"))
     }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
-    var zoomScale by remember(page.id) { mutableStateOf(1f) }
-    var zoomOffset by remember(page.id) { mutableStateOf(Offset.Zero) }
+    
+    val animatedZoomScale = remember { Animatable(1f) }
+    val animatedOffsetX = remember { Animatable(0f) }
+    val animatedOffsetY = remember { Animatable(0f) }
+    val coroutineScope = rememberCoroutineScope()
+    
     var activeIndex by remember(page.id, selectedBlockIndex) { mutableIntStateOf(selectedBlockIndex) }
     val selected = page.blocks.getOrNull(selectedBlockIndex)
     var draftBounds by remember(page.id, selected?.id, selected?.bounds) {
@@ -114,7 +127,7 @@ fun ManipulablePagePreview(
     var sourceBounds by remember(page.id, selected?.id) {
         mutableStateOf(selected?.bounds ?: RelativeBounds(.25f, .4f, .75f, .6f))
     }
-    var dragHandle by remember { mutableStateOf(PageDragHandle.NONE) }
+    var dragTarget by remember { mutableStateOf(DragTarget.NONE) }
     val shape = RoundedCornerShape(18.dp)
 
     Box(
@@ -124,32 +137,45 @@ fun ManipulablePagePreview(
     ) {
         if (bitmap != null) {
             val bmp = bitmap!!
-            fun applyZoom(targetScale: Float, focus: Offset, pan: Offset = Offset.Zero) {
+            
+            suspend fun applyZoom(targetScale: Float, focus: Offset, pan: Offset = Offset.Zero) {
                 val newScale = targetScale.coerceIn(1f, 6f)
-                val change = if (zoomScale == 0f) 1f else newScale / zoomScale
-                val unclamped = focus - (focus - zoomOffset) * change + pan
+                val currentScale = animatedZoomScale.value
+                val change = if (currentScale == 0f) 1f else newScale / currentScale
+                val currentOffset = Offset(animatedOffsetX.value, animatedOffsetY.value)
+                val unclamped = focus - (focus - currentOffset) * change + pan
                 val width = viewport.width.toFloat()
                 val height = viewport.height.toFloat()
-                zoomScale = newScale
-                zoomOffset = Offset(
-                    unclamped.x.coerceIn(width - width * newScale, 0f),
-                    unclamped.y.coerceIn(height - height * newScale, 0f),
-                )
+                
+                animatedZoomScale.snapTo(newScale)
+                animatedOffsetX.snapTo(unclamped.x.coerceIn(width - width * newScale, 0f))
+                animatedOffsetY.snapTo(unclamped.y.coerceIn(height - height * newScale, 0f))
             }
+            
+            suspend fun animateZoomTo(targetScale: Float, focusPoint: Offset = Offset(viewport.width / 2f, viewport.height / 2f)) {
+                val newScale = targetScale.coerceIn(1f, 6f)
+                val currentScale = animatedZoomScale.value
+                val change = if (currentScale == 0f) 1f else newScale / currentScale
+                val currentOffset = Offset(animatedOffsetX.value, animatedOffsetY.value)
+                val unclamped = focusPoint - (focusPoint - currentOffset) * change
+                val width = viewport.width.toFloat()
+                val height = viewport.height.toFloat()
+                
+                val targetX = unclamped.x.coerceIn(width - width * newScale, 0f)
+                val targetY = unclamped.y.coerceIn(height - height * newScale, 0f)
+                
+                coroutineScope.launch { animatedZoomScale.animateTo(newScale, spring(dampingRatio = 0.8f)) }
+                coroutineScope.launch { animatedOffsetX.animateTo(targetX, spring(dampingRatio = 0.8f)) }
+                coroutineScope.launch { animatedOffsetY.animateTo(targetY, spring(dampingRatio = 0.8f)) }
+            }
+
             Box(
                 Modifier.fillMaxSize().padding(6.dp)
                     .onSizeChanged { viewport = it }
-                    // Clip only while zoomed in; at rest the draft preview must be free to
-                    // overhang the page edge (rotated text near a border was getting cut).
-                    .then(if (zoomScale > 1.001f) Modifier.clip(RoundedCornerShape(12.dp)) else Modifier)
+                    .then(if (animatedZoomScale.value > 1.001f) Modifier.clip(RoundedCornerShape(12.dp)) else Modifier)
                     .pointerInput(page.blocks, selectedBlockIndex, viewport) {
-                        // Screen-space pinch handling; runs outside the zoom layer so its
-                        // coordinates are stable while the transform changes underneath.
-                        // A pinch that starts on the selected text block scales that block
-                        // (box + text together, live); anywhere else it zooms the page.
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                            var panningView = false
                             var decided = false
                             var pinchingBlock = false
                             var pinchDecided = false
@@ -160,15 +186,14 @@ fun ManipulablePagePreview(
                                     if (!pinchDecided) {
                                         pinchDecided = true
                                         decided = true
-                                        panningView = false
                                         val centroid = event.calculateCentroid()
-                                        val local = (centroid - zoomOffset) / zoomScale
+                                        val currentOffset = Offset(animatedOffsetX.value, animatedOffsetY.value)
+                                        val local = (centroid - currentOffset) / animatedZoomScale.value
                                         val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
                                         val block = page.blocks.getOrNull(selectedBlockIndex)?.takeIf { it.applied }
                                         val selectedRect = block?.bounds?.toPageRect(geometry)
-                                        pinchingBlock = selectedRect?.inflate(24.dp.toPx())
-                                            ?.contains(local) == true
-                                        if (pinchingBlock && block != null) {
+                                        pinchingBlock = selectedRect?.inflate(24.dp.toPx())?.contains(local) == true
+                                        if (pinchingBlock && block != null && !block.style.locked) {
                                             activeIndex = selectedBlockIndex
                                             draftBounds = block.bounds
                                             draftRotation = block.style.rotationDegrees
@@ -178,36 +203,22 @@ fun ManipulablePagePreview(
                                     }
                                     if (pinchingBlock) {
                                         val zoom = event.calculateZoom()
+                                        val rotation = event.calculateRotation()
                                         if (zoom != 1f) draftBounds = draftBounds.scaledAroundCenter(zoom)
+                                        if (rotation != 0f) {
+                                            draftRotation = normalizeDegrees(draftRotation + rotation)
+                                            draftRotation = snapAngle(draftRotation)
+                                        }
                                         event.changes.forEach { it.consume() }
                                     } else {
-                                        applyZoom(
-                                            zoomScale * event.calculateZoom(),
-                                            event.calculateCentroid(),
-                                            event.calculatePan(),
-                                        )
-                                        event.changes.forEach { it.consume() }
-                                    }
-                                } else if (pressed.size == 1 && zoomScale > 1f && !pinchingBlock) {
-                                    if (!decided) {
-                                        val moved = (pressed[0].position - down.position).getDistance()
-                                        if (moved > viewConfiguration.touchSlop) {
-                                            decided = true
-                                            // Pan the view only when the touch began on empty page
-                                            // area; touches on a block keep moving the block.
-                                            val local = (down.position - zoomOffset) / zoomScale
-                                            val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
-                                            val inflation = 40.dp.toPx()
-                                            panningView = page.blocks.none { block ->
-                                                block.applied && block.bounds.toPageRect(geometry)
-                                                    .inflate(inflation).contains(local)
-                                            }
+                                        coroutineScope.launch {
+                                            applyZoom(
+                                                animatedZoomScale.value * event.calculateZoom(),
+                                                event.calculateCentroid(),
+                                                event.calculatePan(),
+                                            )
                                         }
-                                    }
-                                    if (panningView) {
-                                        val change = pressed[0]
-                                        applyZoom(zoomScale, Offset.Zero, change.position - change.previousPosition)
-                                        change.consume()
+                                        event.changes.forEach { it.consume() }
                                     }
                                 }
                                 if (event.changes.none { it.pressed }) {
@@ -225,64 +236,52 @@ fun ManipulablePagePreview(
                     }
                     .graphicsLayer {
                         transformOrigin = TransformOrigin(0f, 0f)
-                        scaleX = zoomScale
-                        scaleY = zoomScale
-                        translationX = zoomOffset.x
-                        translationY = zoomOffset.y
+                        scaleX = animatedZoomScale.value
+                        scaleY = animatedZoomScale.value
+                        translationX = animatedOffsetX.value
+                        translationY = animatedOffsetY.value
                     }
                     .pointerInput(page.blocks, viewport) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(
-                                requireUnconsumed = false,
-                                pass = PointerEventPass.Initial,
-                            )
-                            var isTap = true
-                            while (true) {
-                                // Observe before the drag recognizer consumes movement. This keeps
-                                // tap selection and direct dragging independent from each other.
-                                val event = awaitPointerEvent(PointerEventPass.Initial)
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
-                                    isTap = false
+                        detectTapGestures(
+                            onTap = { position ->
+                                val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
+                                val hit = page.blocks.indices.sortedByDescending { page.blocks[it].style.zIndex }.firstOrNull { index ->
+                                    val b = page.blocks[index]
+                                    b.applied && b.style.visible && !b.style.locked && b.bounds.toPageRect(geometry).contains(position)
                                 }
-                                if (!change.pressed) {
-                                    if (isTap) {
-                                        val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
-                                        val hit = page.blocks.indices.reversed().firstOrNull { index ->
-                                            page.blocks[index].applied &&
-                                                page.blocks[index].bounds.toPageRect(geometry).contains(down.position)
-                                        }
-                                        if (hit != null) onSelectBlock(hit)
-                                    }
-                                    break
+                                if (hit != null) onSelectBlock(hit) else onDeselectAll()
+                            },
+                            onDoubleTap = { position ->
+                                coroutineScope.launch {
+                                    if (animatedZoomScale.value > 1.01f) animateZoomTo(1f)
+                                    else animateZoomTo(2.5f, focusPoint = position)
                                 }
                             }
-                        }
+                        )
                     }
-                    .pointerInput(page.blocks, selectedBlockIndex, mode, viewport) {
+                    .pointerInput(page.blocks, selectedBlockIndex, viewport) {
+                        val velocityTracker = VelocityTracker()
                         detectDragGestures(
                             onDragStart = { pointer ->
                                 val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
                                 val currentBlock = page.blocks.getOrNull(selectedBlockIndex)
                                 val currentRect = currentBlock?.bounds?.toPageRect(geometry)
                                 val handleRadius = 32.dp.toPx()
-                                val currentHandle = if (currentBlock?.applied == true && currentRect != null) {
-                                    hitHandle(pointer, currentRect, mode, handleRadius)
-                                } else {
-                                    PageDragHandle.NONE
-                                }
-                                if (currentHandle != PageDragHandle.NONE) {
+                                dragTarget = if (currentBlock?.applied == true && currentRect != null && !currentBlock.style.locked) {
+                                    hitTest(pointer, currentRect, handleRadius)
+                                } else DragTarget.NONE
+                                
+                                if (dragTarget != DragTarget.NONE) {
                                     val activeBlock = requireNotNull(currentBlock)
                                     activeIndex = selectedBlockIndex
                                     draftBounds = activeBlock.bounds
                                     draftRotation = activeBlock.style.rotationDegrees
                                     sourceBounds = activeBlock.bounds
                                     previewPending = true
-                                    dragHandle = currentHandle
                                 } else {
-                                    val hit = page.blocks.indices.reversed().firstOrNull { index ->
-                                        page.blocks[index].applied &&
-                                            page.blocks[index].bounds.toPageRect(geometry).contains(pointer)
+                                    val hit = page.blocks.indices.sortedByDescending { page.blocks[it].style.zIndex }.firstOrNull { index ->
+                                        val b = page.blocks[index]
+                                        b.applied && b.style.visible && !b.style.locked && b.bounds.toPageRect(geometry).contains(pointer)
                                     }
                                     if (hit != null) {
                                         val block = page.blocks[hit]
@@ -292,51 +291,58 @@ fun ManipulablePagePreview(
                                         sourceBounds = block.bounds
                                         previewPending = true
                                         onSelectBlock(hit)
-                                        dragHandle = PageDragHandle.MOVE
-                                    } else {
-                                        dragHandle = PageDragHandle.NONE
+                                        dragTarget = DragTarget.MOVE
+                                    } else if (animatedZoomScale.value > 1f) {
+                                        dragTarget = DragTarget.PAN
                                     }
                                 }
                             },
                             onDrag = { change, amount ->
-                                if (dragHandle == PageDragHandle.NONE) return@detectDragGestures
+                                if (dragTarget == DragTarget.NONE) return@detectDragGestures
                                 change.consume()
+                                velocityTracker.addPosition(change.uptimeMillis, change.position)
                                 val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
                                 val dx = amount.x / geometry.width.coerceAtLeast(1f)
                                 val dy = amount.y / geometry.height.coerceAtLeast(1f)
-                                draftBounds = when (dragHandle) {
-                                    PageDragHandle.MOVE -> draftBounds.moveBy(dx, dy)
-                                    PageDragHandle.LEFT,
-                                    PageDragHandle.TOP,
-                                    PageDragHandle.RIGHT,
-                                    PageDragHandle.BOTTOM -> draftBounds.resizeFrom(dragHandle, dx, dy)
-                                    else -> draftBounds
-                                }
-                                if (dragHandle == PageDragHandle.ROTATE) {
-                                    val rect = draftBounds.toPageRect(geometry)
-                                    val degrees = Math.toDegrees(
-                                        atan2(
-                                            change.position.y - rect.center.y,
-                                            change.position.x - rect.center.x,
-                                        ).toDouble(),
-                                    ).toFloat() + 90f
-                                    draftRotation = normalizeDegrees(degrees)
+                                
+                                when (dragTarget) {
+                                    DragTarget.MOVE -> draftBounds = draftBounds.moveBy(dx, dy)
+                                    DragTarget.CORNER_TL, DragTarget.CORNER_TR,
+                                    DragTarget.CORNER_BL, DragTarget.CORNER_BR -> 
+                                        draftBounds = draftBounds.resizeFromCorner(dragTarget, dx, dy)
+                                    DragTarget.ROTATE -> {
+                                        val rect = draftBounds.toPageRect(geometry)
+                                        val degrees = Math.toDegrees(
+                                            atan2(
+                                                change.position.y - rect.center.y,
+                                                change.position.x - rect.center.x,
+                                            ).toDouble(),
+                                        ).toFloat() + 90f
+                                        draftRotation = snapAngle(normalizeDegrees(degrees))
+                                    }
+                                    DragTarget.PAN -> {
+                                        coroutineScope.launch {
+                                            applyZoom(animatedZoomScale.value, Offset.Zero, amount)
+                                        }
+                                    }
+                                    else -> {}
                                 }
                             },
                             onDragCancel = {
-                                dragHandle = PageDragHandle.NONE
+                                dragTarget = DragTarget.NONE
                                 previewPending = false
                                 activeIndex = selectedBlockIndex
                             },
                             onDragEnd = {
-                                if (dragHandle != PageDragHandle.NONE && activeIndex in page.blocks.indices) {
-                                    val resized = dragHandle == PageDragHandle.LEFT ||
-                                        dragHandle == PageDragHandle.TOP ||
-                                        dragHandle == PageDragHandle.RIGHT ||
-                                        dragHandle == PageDragHandle.BOTTOM
+                                if (dragTarget == DragTarget.PAN) {
+                                    val velocity = velocityTracker.calculateVelocity()
+                                    coroutineScope.launch { animatedOffsetX.animateDecay(velocity.x, exponentialDecay()) }
+                                    coroutineScope.launch { animatedOffsetY.animateDecay(velocity.y, exponentialDecay()) }
+                                } else if (dragTarget != DragTarget.NONE && activeIndex in page.blocks.indices) {
+                                    val resized = dragTarget in listOf(DragTarget.CORNER_TL, DragTarget.CORNER_TR, DragTarget.CORNER_BL, DragTarget.CORNER_BR)
                                     onTransformCommitted(activeIndex, draftBounds, draftRotation, resized)
                                 }
-                                dragHandle = PageDragHandle.NONE
+                                dragTarget = DragTarget.NONE
                             },
                         )
                     },
@@ -352,10 +358,7 @@ fun ManipulablePagePreview(
                     val geometry = pageImageGeometry(viewport, bmp.width, bmp.height)
                     val oldRect = sourceBounds.toPageRect(geometry)
                     val density = LocalDensity.current
-                    // Fit text once at the gesture's source geometry; every frame after that is a
-                    // pure graphicsLayer transform (scale/translate/rotate) — no re-layout, so the
-                    // text grows and moves with the box at full frame rate. The exact re-fit
-                    // happens on commit when the page re-renders.
+                    
                     val fittedSourceSp = remember(
                         liveBlock.id,
                         liveBlock.translatedText,
@@ -371,23 +374,11 @@ fun ManipulablePagePreview(
                     }
                     val displayScale = geometry.width / bmp.width.coerceAtLeast(1)
                     val liveFontSizeSp = fittedSourceSp * displayScale
-                    Box(
-                        Modifier
-                            .offset {
-                                IntOffset(oldRect.left.roundToInt(), oldRect.top.roundToInt())
-                            }
-                            .size(
-                                with(density) { oldRect.width.toDp() },
-                                with(density) { oldRect.height.toDp() },
-                            )
-                            .background(Color(0xB3FFFFFF)),
-                    )
+                    
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .offset {
-                                IntOffset(oldRect.left.roundToInt(), oldRect.top.roundToInt())
-                            }
+                            .offset { IntOffset(oldRect.left.roundToInt(), oldRect.top.roundToInt()) }
                             .size(
                                 with(density) { oldRect.width.toDp() },
                                 with(density) { oldRect.height.toDp() },
@@ -400,23 +391,44 @@ fun ManipulablePagePreview(
                                 translationX = live.center.x - oldRect.center.x
                                 translationY = live.center.y - oldRect.center.y
                                 rotationZ = draftRotation
+                                rotationX = liveBlock.style.perspective3dX
+                                rotationY = liveBlock.style.perspective3dY
+                                cameraDistance = 12f * density.density
                             }
                             .background(
-                                liveBlock.style.backgroundColorArgb?.let { Color(it.toInt()) }
-                                    ?: Color(0xB3FFFFFF),
-                                RoundedCornerShape(6.dp),
+                                liveBlock.style.backgroundColorArgb?.let {
+                                    Color(it.toInt()).copy(alpha = liveBlock.style.backgroundOpacity)
+                                } ?: Color.Transparent,
+                                RoundedCornerShape(liveBlock.style.backgroundCornerRadiusDp.dp),
                             ),
                     ) {
+                        val textBrush = if (liveBlock.style.gradientEnabled) {
+                            val angleRad = Math.toRadians(liveBlock.style.gradientAngleDegrees.toDouble())
+                            val x0 = 50f - 50f * cos(angleRad).toFloat()
+                            val y0 = 50f - 50f * sin(angleRad).toFloat()
+                            val x1 = 50f + 50f * cos(angleRad).toFloat()
+                            val y1 = 50f + 50f * sin(angleRad).toFloat()
+                            Brush.linearGradient(
+                                colors = listOf(Color(liveBlock.style.gradientStartColorArgb.toInt()), Color(liveBlock.style.gradientEndColorArgb.toInt())),
+                                start = Offset(x0, y0),
+                                end = Offset(x1, y1)
+                            )
+                        } else null
+                        
+                        var textDeco = TextDecoration.None
+                        if (liveBlock.style.underline) textDeco = textDeco + TextDecoration.Underline
+                        if (liveBlock.style.strikethrough) textDeco = textDeco + TextDecoration.LineThrough
+                        
                         Text(
                             text = if (liveBlock.style.vertical) {
                                 liveBlock.translatedText.lines().joinToString("\n") { line ->
                                     line.trim().toCharArray().joinToString("\n")
                                 }
-                            } else {
-                                liveBlock.translatedText
-                            },
-                            color = Color(liveBlock.style.textColorArgb.toInt()),
+                            } else liveBlock.translatedText,
+                            color = if (textBrush == null) Color(liveBlock.style.textColorArgb.toInt()).copy(alpha = liveBlock.style.textOpacity) else Color.Unspecified,
                             fontSize = liveFontSizeSp.coerceIn(.5f, 160f).sp,
+                            letterSpacing = (liveBlock.style.letterSpacingEm * 14).sp,
+                            lineHeight = (liveFontSizeSp * liveBlock.style.lineSpacingMultiplier).sp,
                             fontFamily = when (liveBlock.style.font) {
                                 FontChoice.AUTO, FontChoice.SANS -> FontFamily.Default
                                 FontChoice.SERIF -> FontFamily.Serif
@@ -424,19 +436,26 @@ fun ManipulablePagePreview(
                                 FontChoice.MONOSPACE -> FontFamily.Monospace
                                 FontChoice.CASUAL -> FontFamily(Typeface.create("casual", Typeface.NORMAL))
                                 FontChoice.MANGA -> mangaFont
+                                FontChoice.ACTION -> FontFamily(Typeface.create("sans-serif-black", Typeface.BOLD))
+                                FontChoice.GOTHIC -> FontFamily.Serif
+                                FontChoice.VINTAGE -> FontFamily(Typeface.create("cursive", Typeface.NORMAL))
+                                else -> FontFamily.Default
                             },
-                            fontWeight = if (liveBlock.style.bold) FontWeight.Bold else FontWeight.Normal,
+                            fontWeight = if (liveBlock.style.bold || liveBlock.style.font == FontChoice.ACTION || liveBlock.style.font == FontChoice.GOTHIC) FontWeight.Bold else FontWeight.Normal,
                             fontStyle = if (liveBlock.style.italic) FontStyle.Italic else FontStyle.Normal,
                             textAlign = when (liveBlock.style.alignment) {
                                 com.untrustedtranslations.android.model.TextAlignmentChoice.START -> TextAlign.Start
                                 com.untrustedtranslations.android.model.TextAlignmentChoice.CENTER -> TextAlign.Center
                                 com.untrustedtranslations.android.model.TextAlignmentChoice.END -> TextAlign.End
                             },
+                            textDecoration = textDeco,
                             modifier = Modifier.fillMaxWidth().padding(
-                                // Renderer pads by 6% of box width; mirror it so line wrapping
-                                // matches the committed bitmap even for tiny boxes.
-                                with(density) { (oldRect.width * .06f).toDp() },
+                                with(density) { liveBlock.style.backgroundPaddingDp.dp.toPx().toDp() },
                             ),
+                            style = androidx.compose.ui.text.TextStyle(
+                                brush = textBrush,
+                                alpha = liveBlock.style.textOpacity
+                            )
                         )
                     }
                 }
@@ -446,29 +465,40 @@ fun ManipulablePagePreview(
                         bmp.width,
                         bmp.height,
                     )
-                    page.blocks.forEachIndexed { index, block ->
-                        val isSelected = index == activeIndex && block.applied
-                        val bounds = if (isSelected) draftBounds else block.bounds
-                        val rect = bounds.toPageRect(geometry)
+                    
+                    // Draw snap guides if dragging
+                    if (dragTarget != DragTarget.NONE) {
+                        val activeRect = draftBounds.toPageRect(geometry)
+                        val centerX = geometry.left + geometry.width / 2f
+                        val centerY = geometry.top + geometry.height / 2f
+                        if (abs(activeRect.center.x - centerX) < 4.dp.toPx()) {
+                            drawLine(AppColors.Cyan, Offset(centerX, 0f), Offset(centerX, size.height), strokeWidth = 2.dp.toPx())
+                        }
+                        if (abs(activeRect.center.y - centerY) < 4.dp.toPx()) {
+                            drawLine(AppColors.Cyan, Offset(0f, centerY), Offset(size.width, centerY), strokeWidth = 2.dp.toPx())
+                        }
+                    }
+
+                    // Only draw selection border for the active block
+                    val selBlock = page.blocks.getOrNull(activeIndex)
+                    if (selBlock?.applied == true && selectedBlockIndex != -1) {
+                        val rect = draftBounds.toPageRect(geometry)
                         drawRect(
-                            color = if (isSelected) AppColors.Cyan else AppColors.Violet,
+                            color = AppColors.Cyan,
                             topLeft = rect.topLeft,
                             size = rect.size,
-                            style = Stroke((if (isSelected) 3 else 2).dp.toPx()),
+                            style = Stroke(3.dp.toPx()),
                         )
-                        if (isSelected) {
-                            if (mode == PageTransformMode.RESIZE) {
-                                edgeHandles(rect).forEach { handle ->
-                                    drawCircle(AppColors.Cyan, 10.dp.toPx(), handle)
-                                    drawCircle(AppColors.Void, 4.dp.toPx(), handle)
-                                }
-                            } else {
-                                val stemTop = Offset(rect.center.x, rect.top - 34.dp.toPx())
-                                drawLine(AppColors.Cyan, Offset(rect.center.x, rect.top), stemTop, 3.dp.toPx())
-                                drawCircle(AppColors.Cyan, 11.dp.toPx(), stemTop)
-                                drawCircle(AppColors.Void, 5.dp.toPx(), stemTop)
-                            }
+                        
+                        cornerHandles(rect).forEach { handle ->
+                            drawCircle(AppColors.Cyan, 12.dp.toPx(), handle)
+                            drawCircle(AppColors.Void, 6.dp.toPx(), handle)
                         }
+                        
+                        val rotateHandle = Offset(rect.center.x, rect.top - 40.dp.toPx())
+                        drawLine(AppColors.Cyan, Offset(rect.center.x, rect.top), rotateHandle, 2.dp.toPx())
+                        drawCircle(AppColors.Cyan, 14.dp.toPx(), rotateHandle)
+                        drawCircle(AppColors.Void, 7.dp.toPx(), rotateHandle)
                     }
                 }
             }
@@ -477,9 +507,9 @@ fun ManipulablePagePreview(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (zoomScale > 1.01f) {
+                if (animatedZoomScale.value > 1.01f) {
                     Text(
-                        "${(zoomScale * 100).roundToInt()}%",
+                        "${(animatedZoomScale.value * 100).roundToInt()}%",
                         color = AppColors.Cyan,
                         fontSize = 12.sp,
                         modifier = Modifier
@@ -488,15 +518,14 @@ fun ManipulablePagePreview(
                     )
                 }
                 ZoomControlButton(Icons.Default.ZoomOut, "Zoom out") {
-                    applyZoom(zoomScale / 1.5f, Offset(viewport.width / 2f, viewport.height / 2f))
+                    coroutineScope.launch { animateZoomTo(animatedZoomScale.value / 1.5f) }
                 }
                 ZoomControlButton(Icons.Default.ZoomIn, "Zoom in") {
-                    applyZoom(zoomScale * 1.5f, Offset(viewport.width / 2f, viewport.height / 2f))
+                    coroutineScope.launch { animateZoomTo(animatedZoomScale.value * 1.5f) }
                 }
-                if (zoomScale > 1.01f) {
+                if (animatedZoomScale.value > 1.01f) {
                     ZoomControlButton(Icons.Default.CenterFocusStrong, "Reset zoom") {
-                        zoomScale = 1f
-                        zoomOffset = Offset.Zero
+                        coroutineScope.launch { animateZoomTo(1f) }
                     }
                 }
             }
@@ -518,29 +547,18 @@ private fun ZoomControlButton(
     }
 }
 
-private fun hitHandle(pointer: Offset, rect: Rect, mode: PageTransformMode, radius: Float): PageDragHandle {
-    if (mode == PageTransformMode.ROTATE) {
-        val rotate = Offset(rect.center.x, rect.top - radius * 1.0625f)
-        if ((pointer - rotate).getDistance() <= radius) return PageDragHandle.ROTATE
-        return if (rect.contains(pointer)) PageDragHandle.MOVE else PageDragHandle.NONE
+private fun hitTest(pointer: Offset, rect: Rect, radius: Float): DragTarget {
+    val rotateHandle = Offset(rect.center.x, rect.top - 40.dp.value)
+    if ((pointer - rotateHandle).getDistance() <= radius) return DragTarget.ROTATE
+    cornerHandles(rect).forEachIndexed { i, corner ->
+        if ((pointer - corner).getDistance() <= radius)
+            return listOf(DragTarget.CORNER_TL, DragTarget.CORNER_TR, DragTarget.CORNER_BL, DragTarget.CORNER_BR)[i]
     }
-    val handles = edgeHandles(rect)
-    return when {
-        (pointer - handles[0]).getDistance() <= radius -> PageDragHandle.LEFT
-        (pointer - handles[1]).getDistance() <= radius -> PageDragHandle.TOP
-        (pointer - handles[2]).getDistance() <= radius -> PageDragHandle.RIGHT
-        (pointer - handles[3]).getDistance() <= radius -> PageDragHandle.BOTTOM
-        rect.contains(pointer) -> PageDragHandle.MOVE
-        else -> PageDragHandle.NONE
-    }
+    if (rect.contains(pointer)) return DragTarget.MOVE
+    return DragTarget.NONE
 }
 
-private fun edgeHandles(rect: Rect) = listOf(
-    Offset(rect.left, rect.center.y),
-    Offset(rect.center.x, rect.top),
-    Offset(rect.right, rect.center.y),
-    Offset(rect.center.x, rect.bottom),
-)
+private fun cornerHandles(rect: Rect) = listOf(rect.topLeft, rect.topRight, rect.bottomLeft, rect.bottomRight)
 
 private fun pageImageGeometry(viewport: IntSize, imageWidth: Int, imageHeight: Int): Rect {
     val width = viewport.width.coerceAtLeast(1).toFloat()
@@ -582,13 +600,13 @@ private fun RelativeBounds.moveBy(dx: Float, dy: Float): RelativeBounds {
     return RelativeBounds(nextLeft, nextTop, nextLeft + width, nextTop + height)
 }
 
-private fun RelativeBounds.resizeFrom(handle: PageDragHandle, dx: Float, dy: Float): RelativeBounds {
+private fun RelativeBounds.resizeFromCorner(handle: DragTarget, dx: Float, dy: Float): RelativeBounds {
     val minimum = .035f
     return when (handle) {
-        PageDragHandle.LEFT -> copy(left = (left + dx).coerceIn(0f, right - minimum))
-        PageDragHandle.TOP -> copy(top = (top + dy).coerceIn(0f, bottom - minimum))
-        PageDragHandle.RIGHT -> copy(right = (right + dx).coerceIn(left + minimum, 1f))
-        PageDragHandle.BOTTOM -> copy(bottom = (bottom + dy).coerceIn(top + minimum, 1f))
+        DragTarget.CORNER_TL -> copy(left = (left + dx).coerceIn(0f, right - minimum), top = (top + dy).coerceIn(0f, bottom - minimum))
+        DragTarget.CORNER_TR -> copy(right = (right + dx).coerceIn(left + minimum, 1f), top = (top + dy).coerceIn(0f, bottom - minimum))
+        DragTarget.CORNER_BL -> copy(left = (left + dx).coerceIn(0f, right - minimum), bottom = (bottom + dy).coerceIn(top + minimum, 1f))
+        DragTarget.CORNER_BR -> copy(right = (right + dx).coerceIn(left + minimum, 1f), bottom = (bottom + dy).coerceIn(top + minimum, 1f))
         else -> this
     }
 }
@@ -598,4 +616,10 @@ private fun normalizeDegrees(value: Float): Float {
     while (normalized > 180f) normalized -= 360f
     while (normalized < -180f) normalized += 360f
     return normalized
+}
+
+private fun snapAngle(degrees: Float): Float {
+    val snaps = listOf(0f, 45f, 90f, 135f, 180f, -45f, -90f, -135f, -180f)
+    val threshold = 3f
+    return snaps.firstOrNull { abs(degrees - it) < threshold } ?: degrees
 }

@@ -32,13 +32,36 @@ enum class SourceScript(val label: String, val languageTag: String) {
 }
 
 enum class FontChoice(val label: String) {
-    AUTO("Auto / system"),
-    SANS("Sans"),
-    SERIF("Serif"),
+    AUTO("Auto / System"),
+    MANGA("Manga / Comic"),
+    ACTION("Action / Impact"),
+    SANS("Modern Sans"),
+    SERIF("Classic Serif"),
     CONDENSED("Condensed"),
     MONOSPACE("Monospace"),
-    CASUAL("Casual"),
-    MANGA("Manga"),
+    CASUAL("Casual Script"),
+    GOTHIC("Gothic Bold"),
+    VINTAGE("Vintage Cursive"),
+    HANDWRITING("Handwriting"),
+    CURSIVE("Cursive"),
+    DISPLAY("Display"),
+    ROUNDED("Rounded"),
+    PIXEL("Pixel Art"),
+    COMIC_SANS("Comic Sans"),
+    IMPACT("Impact"),
+    BRUSH("Brush Script"),
+    STENCIL("Stencil"),
+    TYPEWRITER("Typewriter"),
+    BLACKLETTER("Blackletter"),
+    ART_DECO("Art Deco"),
+    GRAFFITI("Graffiti"),
+    SCRIPT("Script"),
+    SLAB_SERIF("Slab Serif"),
+    THIN("Thin"),
+    HEAVY("Heavy"),
+    WIDE("Wide"),
+    NARROW("Narrow"),
+    CUSTOM("Custom Font")
 }
 
 enum class TextAlignmentChoice(val label: String) {
@@ -53,8 +76,40 @@ data class TextStyle(
     val bold: Boolean = true,
     val italic: Boolean = false,
     val vertical: Boolean = false,
-    val textColorArgb: Long = 0xFF000000,
+    val textColorArgb: Long = 0xFF000000L,
+    val textOpacity: Float = 1.0f,
     val backgroundColorArgb: Long? = null,
+    val backgroundOpacity: Float = 1.0f,
+    val backgroundCornerRadiusDp: Float = 8f,
+    val backgroundPaddingDp: Float = 6f,
+    val strokeWidthSp: Float = 0f,
+    val strokeColorArgb: Long = 0xFFFFFFFFL,
+    val shadowBlurRadiusSp: Float = 0f,
+    val shadowDxSp: Float = 0f,
+    val shadowDySp: Float = 0f,
+    val shadowColorArgb: Long = 0x99000000L,
+    val letterSpacingEm: Float = 0f,
+    val lineSpacingMultiplier: Float = 1.0f,
+    val curveSweepAngle: Float = 0f,
+    val underline: Boolean = false,
+    val strikethrough: Boolean = false,
+    val highlightColorArgb: Long? = null,
+    val highlightOpacity: Float = 0.5f,
+    val gradientEnabled: Boolean = false,
+    val gradientStartColorArgb: Long = 0xFFFF0000L,
+    val gradientEndColorArgb: Long = 0xFF0000FFL,
+    val gradientAngleDegrees: Float = 0f,
+    val perspective3dX: Float = 0f,
+    val perspective3dY: Float = 0f,
+    val zIndex: Int = 0,
+    val locked: Boolean = false,
+    val visible: Boolean = true,
+)
+
+data class SavedStyle(
+    val name: String,
+    val style: TextStyle,
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 data class RelativeBounds(val left: Float, val top: Float, val right: Float, val bottom: Float)

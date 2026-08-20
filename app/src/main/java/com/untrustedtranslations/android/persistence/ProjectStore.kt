@@ -142,7 +142,20 @@ object ProjectStore {
         put("italic", block.style.italic)
         put("vertical", block.style.vertical)
         put("textColorArgb", block.style.textColorArgb)
+        put("textOpacity", block.style.textOpacity)
         put("backgroundColorArgb", block.style.backgroundColorArgb ?: JSONObject.NULL)
+        put("backgroundOpacity", block.style.backgroundOpacity)
+        put("backgroundCornerRadiusDp", block.style.backgroundCornerRadiusDp)
+        put("backgroundPaddingDp", block.style.backgroundPaddingDp)
+        put("strokeWidthSp", block.style.strokeWidthSp)
+        put("strokeColorArgb", block.style.strokeColorArgb)
+        put("shadowBlurRadiusSp", block.style.shadowBlurRadiusSp)
+        put("shadowDxSp", block.style.shadowDxSp)
+        put("shadowDySp", block.style.shadowDySp)
+        put("shadowColorArgb", block.style.shadowColorArgb)
+        put("letterSpacingEm", block.style.letterSpacingEm)
+        put("lineSpacingMultiplier", block.style.lineSpacingMultiplier)
+        put("curveSweepAngle", block.style.curveSweepAngle)
         put("applied", block.applied)
     }
 
@@ -167,8 +180,21 @@ object ProjectStore {
                 bold = json.optBoolean("bold", true),
                 italic = json.optBoolean("italic", false),
                 vertical = json.optBoolean("vertical", false),
-                textColorArgb = json.optLong("textColorArgb", 0xFF000000),
+                textColorArgb = json.optLong("textColorArgb", 0xFF000000L),
+                textOpacity = json.optDouble("textOpacity", 1.0).toFloat(),
                 backgroundColorArgb = if (json.isNull("backgroundColorArgb")) null else json.optLong("backgroundColorArgb"),
+                backgroundOpacity = json.optDouble("backgroundOpacity", 1.0).toFloat(),
+                backgroundCornerRadiusDp = json.optDouble("backgroundCornerRadiusDp", 8.0).toFloat(),
+                backgroundPaddingDp = json.optDouble("backgroundPaddingDp", 6.0).toFloat(),
+                strokeWidthSp = json.optDouble("strokeWidthSp", 0.0).toFloat(),
+                strokeColorArgb = json.optLong("strokeColorArgb", 0xFFFFFFFFL),
+                shadowBlurRadiusSp = json.optDouble("shadowBlurRadiusSp", 0.0).toFloat(),
+                shadowDxSp = json.optDouble("shadowDxSp", 0.0).toFloat(),
+                shadowDySp = json.optDouble("shadowDySp", 0.0).toFloat(),
+                shadowColorArgb = json.optLong("shadowColorArgb", 0x99000000L),
+                letterSpacingEm = json.optDouble("letterSpacingEm", 0.0).toFloat(),
+                lineSpacingMultiplier = json.optDouble("lineSpacingMultiplier", 1.0).toFloat(),
+                curveSweepAngle = json.optDouble("curveSweepAngle", 0.0).toFloat(),
             ),
             applied = json.optBoolean("applied"),
         )

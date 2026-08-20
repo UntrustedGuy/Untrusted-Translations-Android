@@ -23,7 +23,7 @@ import java.util.UUID
 import com.untrustedtranslations.android.util.AiTier
 import com.untrustedtranslations.android.util.DeviceTierDetector
 
-enum class AppScreen { IMPORT, PAGE, EDITOR }
+enum class AppScreen { IMPORT, PAGE, EDITOR, ADD_PAGE, GALLERY }
 
 class TranslationViewModel(application: Application) : AndroidViewModel(application) {
     var screen by mutableStateOf(AppScreen.IMPORT); private set
@@ -40,6 +40,9 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     var showAddTextDialog by mutableStateOf(false); private set
     var manualTextDraft by mutableStateOf(""); private set
     var manualBackgroundArgb by mutableStateOf<Long?>(null); private set
+    var manualFontDraft by mutableStateOf(FontChoice.MANGA); private set
+    var manualTextColorArgb by mutableStateOf(0xFF000000L); private set
+    var manualStrokeWidth by mutableStateOf(0f); private set
     var ocrProvider by mutableStateOf(
         if (BuildConfig.FLAVOR == "foss") OcrProvider.RAPID_OCR else OcrProvider.ML_KIT,
     ); private set
@@ -460,22 +463,111 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         screen = AppScreen.EDITOR
     }
 
-    fun closeEditor() { screen = AppScreen.PAGE }
-    fun saveAndCloseEditor() {
+    fun closeEditor() { 
+        screen = AppScreen.PAGE 
+    }
+    fun onDeselectAll() {
+        selectedBlockIndex = -1
+    }
+        fun applyBlock() = viewModelScope.launch {
+        if (busyMessage != null) return@launch
+        val page = currentPage ?: return@launch
+        val block = currentBlock ?: return@launch
+        runBusy("Replacing text on page...") {
+            val blocks = page.blocks.toMutableList().apply { this[selectedBlockIndex] = block.copy(applied = true) }
+            val rendered = com.untrustedtranslations.android.processing.PageRenderer.apply(getApplication(), page, blocks)
+            recordState()
+            replaceCurrentPage(page.copy(renderedSource = rendered, blocks = blocks, saved = false), record = false)
+            saveNow()
+        }
+    }
+
+    fun saveAndCloseEditor() = viewModelScope.launch {
+        if (busyMessage != null) return@launch
+        val page = currentPage ?: return@launch
+        val block = currentBlock ?: return@launch
+        if (!block.applied) {
+            runBusy("Replacing text on page...") {
+                val blocks = page.blocks.toMutableList().apply { this[selectedBlockIndex] = block.copy(applied = true) }
+                val rendered = com.untrustedtranslations.android.processing.PageRenderer.apply(getApplication(), page, blocks)
+                recordState()
+                replaceCurrentPage(page.copy(renderedSource = rendered, blocks = blocks, saved = false), record = false)
+                saveNow()
+            }
+        } else {
+            save()
+        }
+        onDeselectAll()
+        screen = AppScreen.PAGE
+    }
+    fun saveAndExitProject() {
         if (busyMessage != null) return
         save()
-        screen = AppScreen.PAGE
+        onDeselectAll()
+        screen = AppScreen.IMPORT // Actually exit the project
     }
     fun updateOriginal(value: String) = editBlock { copy(originalText = value, applied = false) }
     fun updateTranslation(value: String) = editBlock { copy(translatedText = value, applied = false) }
     fun updateFontSize(value: Float) = editBlock { copy(style = style.copy(fontSizeSp = value), applied = false) }
     fun updateRotation(value: Float) = editBlock { copy(style = style.copy(rotationDegrees = value), applied = false) }
-    fun updateFont(value: FontChoice) = editBlock { copy(style = style.copy(font = value), applied = false) }
+        fun updateFont(value: FontChoice) = editBlock { copy(style = style.copy(font = value), applied = false) }
+
+    fun importCustomFont(uri: Uri) = viewModelScope.launch {
+        runBusy("Importing font...") {
+            try {
+                val file = java.io.File(getApplication<android.app.Application>().filesDir, "custom_font.ttf")
+                getApplication<android.app.Application>().contentResolver.openInputStream(uri)?.use { input ->
+                    file.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                updateFont(FontChoice.CUSTOM)
+            } catch (e: Exception) {
+                errorMessage = "Could not import font: ${e.message}"
+            }
+        }
+    }
     fun updateAlignment(value: TextAlignmentChoice) = editBlock { copy(style = style.copy(alignment = value), applied = false) }
     fun updateBold(value: Boolean) = editBlock { copy(style = style.copy(bold = value), applied = false) }
     fun updateItalic(value: Boolean) = editBlock { copy(style = style.copy(italic = value), applied = false) }
     fun updateVertical(value: Boolean) = editBlock { copy(style = style.copy(vertical = value), applied = false) }
     fun updateTextColor(value: Long) = editBlock { copy(style = style.copy(textColorArgb = value), applied = false) }
+    fun updateTextOpacity(value: Float) = editBlock { copy(style = style.copy(textOpacity = value.coerceIn(0.05f, 1f)), applied = false) }
+    fun updateStrokeWidth(value: Float) = editBlock { copy(style = style.copy(strokeWidthSp = value.coerceIn(0f, 20f)), applied = false) }
+    fun updateStrokeColor(value: Long) = editBlock { copy(style = style.copy(strokeColorArgb = value), applied = false) }
+    fun updateShadowBlur(value: Float) = editBlock { copy(style = style.copy(shadowBlurRadiusSp = value.coerceIn(0f, 30f)), applied = false) }
+    fun updateShadowDx(value: Float) = editBlock { copy(style = style.copy(shadowDxSp = value.coerceIn(-30f, 30f)), applied = false) }
+    fun updateShadowDy(value: Float) = editBlock { copy(style = style.copy(shadowDySp = value.coerceIn(-30f, 30f)), applied = false) }
+    fun updateShadowColor(value: Long) = editBlock { copy(style = style.copy(shadowColorArgb = value), applied = false) }
+    fun updateLetterSpacing(value: Float) = editBlock { copy(style = style.copy(letterSpacingEm = value.coerceIn(-0.1f, 0.6f)), applied = false) }
+    fun updateLineSpacing(value: Float) = editBlock { copy(style = style.copy(lineSpacingMultiplier = value.coerceIn(0.6f, 2.5f)), applied = false) }
+    fun updateCurveAngle(value: Float) = editBlock { copy(style = style.copy(curveSweepAngle = value.coerceIn(-180f, 180f)), applied = false) }
+    fun updateBackgroundColor(value: Long?) = editBlock { copy(style = style.copy(backgroundColorArgb = value), applied = false) }
+    fun updateBackgroundOpacity(value: Float) = editBlock { copy(style = style.copy(backgroundOpacity = value.coerceIn(0.05f, 1f)), applied = false) }
+    fun updateBackgroundRadius(value: Float) = editBlock { copy(style = style.copy(backgroundCornerRadiusDp = value.coerceIn(0f, 40f)), applied = false) }
+    fun updateBackgroundPadding(value: Float) = editBlock { copy(style = style.copy(backgroundPaddingDp = value.coerceIn(0f, 30f)), applied = false) }
+    fun updateHighlightColor(value: Long?) = editBlock { copy(style = style.copy(highlightColorArgb = value), applied = false) }
+    fun updateGradientEnabled(value: Boolean) = editBlock { copy(style = style.copy(gradientEnabled = value), applied = false) }
+    fun updateGradientStartColor(value: Long) = editBlock { copy(style = style.copy(gradientStartColorArgb = value), applied = false) }
+    fun updateGradientEndColor(value: Long) = editBlock { copy(style = style.copy(gradientEndColorArgb = value), applied = false) }
+    fun updateGradientAngle(value: Float) = editBlock { copy(style = style.copy(gradientAngleDegrees = value.coerceIn(0f, 360f)), applied = false) }
+    fun updatePerspective3dX(value: Float) = editBlock { copy(style = style.copy(perspective3dX = value.coerceIn(-80f, 80f)), applied = false) }
+    fun updatePerspective3dY(value: Float) = editBlock { copy(style = style.copy(perspective3dY = value.coerceIn(-80f, 80f)), applied = false) }
+    fun updateUnderline(value: Boolean) = editBlock { copy(style = style.copy(underline = value), applied = false) }
+    fun updateStrikethrough(value: Boolean) = editBlock { copy(style = style.copy(strikethrough = value), applied = false) }
+    fun updateZIndex(value: Int) = editBlock { copy(style = style.copy(zIndex = value), applied = false) }
+    fun updateLocked(value: Boolean) = editBlock { copy(style = style.copy(locked = value), applied = false) }
+    fun updateVisible(value: Boolean) = editBlock { copy(style = style.copy(visible = value), applied = false) }
+    fun updateTextCase(mode: Int) {
+        val current = currentBlock?.translatedText ?: return
+        val transformed = when (mode) {
+            0 -> current.uppercase()
+            1 -> current.lowercase()
+            2 -> current.split(" ").joinToString(" ") { it.replaceFirstChar(Char::titlecase) }
+            else -> current
+        }
+        updateTranslation(transformed)
+    }
     fun previousBlock() {
         val indices = editorBlockIndices
         val position = indices.indexOf(selectedBlockIndex)
@@ -585,12 +677,32 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun showAddTextEditor() {
         manualTextDraft = ""
         manualBackgroundArgb = null
+        manualFontDraft = FontChoice.MANGA
+        manualTextColorArgb = 0xFF000000L
+        manualStrokeWidth = 0f
         showAddTextDialog = true
     }
 
     fun dismissAddTextEditor() { showAddTextDialog = false }
     fun updateManualText(value: String) { manualTextDraft = value }
-    fun updateManualBackground(value: Long?) { manualBackgroundArgb = value }
+    fun updateManualBackground(value: Long?) {
+        manualBackgroundArgb = value
+        if (value == 0xFF000000L && manualTextColorArgb == 0xFF000000L) {
+            manualTextColorArgb = 0xFFFFFFFFL
+        }
+    }
+    fun updateManualFont(value: FontChoice) { manualFontDraft = value }
+    fun updateManualTextColor(value: Long) { manualTextColorArgb = value }
+    fun updateManualStrokeWidth(value: Float) { manualStrokeWidth = value }
+    fun transformManualTextCase(mode: Int) {
+        val current = manualTextDraft
+        manualTextDraft = when (mode) {
+            0 -> current.uppercase()
+            1 -> current.lowercase()
+            2 -> current.split(" ").joinToString(" ") { it.replaceFirstChar(Char::titlecase) }
+            else -> current
+        }
+    }
 
     fun confirmAddText() = viewModelScope.launch {
         val page = currentPage ?: return@launch
@@ -601,15 +713,17 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 id = UUID.randomUUID().toString(),
                 originalText = "",
                 translatedText = text,
-                bounds = RelativeBounds(.3f, .44f, .7f, .56f),
+                bounds = RelativeBounds(.25f, .42f, .75f, .58f),
                 eraseBounds = null,
                 style = TextStyle(
-                    fontSizeSp = 24f,
-                    font = FontChoice.MANGA,
+                    fontSizeSp = 26f,
+                    font = manualFontDraft,
                     alignment = TextAlignmentChoice.CENTER,
                     bold = true,
-                    textColorArgb = if (manualBackgroundArgb == 0xFF000000L) 0xFFFFFFFFL else 0xFF000000L,
+                    textColorArgb = manualTextColorArgb,
                     backgroundColorArgb = manualBackgroundArgb,
+                    strokeWidthSp = manualStrokeWidth,
+                    strokeColorArgb = if (manualTextColorArgb == 0xFFFFFFFFL) 0xFF000000L else 0xFFFFFFFFL,
                 ),
                 applied = true,
             )
@@ -623,7 +737,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             selectedBlockIndex = blocks.lastIndex
             manualTextDraft = ""
             showAddTextDialog = false
-            screen = AppScreen.PAGE
+            screen = AppScreen.EDITOR
         }
     }
 
@@ -689,17 +803,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             )
         }
 
-    fun applyBlock() = viewModelScope.launch {
-        if (busyMessage != null) return@launch
-        val page = currentPage ?: return@launch
-        val block = currentBlock ?: return@launch
-        runBusy("Replacing text on page...") {
-            val blocks = page.blocks.toMutableList().apply { this[selectedBlockIndex] = block.copy(applied = true) }
-            val rendered = PageRenderer.apply(getApplication(), page, blocks)
-            recordState()
-            replaceCurrentPage(page.copy(renderedSource = rendered, blocks = blocks, saved = false), record = false)
-        }
-    }
+
 
     fun undo() {
         val current = project ?: return
@@ -748,7 +852,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         if (current.currentPageIndex >= current.pages.lastIndex) return
         recordState()
         project = current.copy(currentPageIndex = current.currentPageIndex + 1, updatedAt = System.currentTimeMillis())
-        selectedBlockIndex = 0
+        onDeselectAll()
         screen = AppScreen.PAGE
         scheduleAutosave()
         if (currentPage?.processed != true) processCurrentPage()
@@ -866,4 +970,61 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         OnnxSessionCache.releaseAll()
         super.onCleared()
     }
+
+    fun appendDocument(uri: Uri) = viewModelScope.launch {
+        val currentProject = project ?: return@launch
+        runBusy("Appending page...") {
+            try {
+                val newProject = ComicImporter.appendImage(getApplication(), uri, currentProject)
+                project = newProject
+                recordState()
+                project = newProject.copy(currentPageIndex = newProject.pages.size - 1)
+                selectedBlockIndex = 0
+                screen = AppScreen.PAGE
+                saveNow()
+            } catch (e: Exception) {
+                errorMessage = e.message ?: "Could not append page."
+            }
+        }
+    }
+
+    fun appendBlankPage(colorArgb: Long?) = viewModelScope.launch {
+        val currentProject = project ?: return@launch
+        runBusy("Creating blank page...") {
+            try {
+                val newProject = ComicImporter.appendBlank(getApplication(), currentProject, colorArgb)
+                project = newProject
+                recordState()
+                project = newProject.copy(currentPageIndex = newProject.pages.size - 1)
+                selectedBlockIndex = 0
+                screen = AppScreen.PAGE
+                saveNow()
+            } catch (e: Exception) {
+                errorMessage = e.message ?: "Could not append blank page."
+            }
+        }
+    }
+    
+    fun openAddPageScreen() {
+        if (busyMessage == null) screen = AppScreen.ADD_PAGE
+    }
+    fun closeAddPageScreen() {
+        screen = AppScreen.PAGE
+    }
+    fun openPageGallery() {
+        if (busyMessage == null) screen = AppScreen.GALLERY
+    }
+    fun closePageGallery() {
+        screen = AppScreen.PAGE
+    }
+    fun jumpToPage(index: Int) {
+        val current = project ?: return
+        if (index in current.pages.indices) {
+            recordState()
+            project = current.copy(currentPageIndex = index)
+            screen = AppScreen.PAGE
+        }
+    }
 }
+
+

@@ -184,4 +184,32 @@ object ComicImporter {
     private fun naturalKey(value: String): String = Regex("\\d+").replace(value.lowercase()) {
         it.value.padStart(12, '0')
     }
+
+    suspend fun appendImage(context: Context, uri: Uri, project: ComicProject): ComicProject = withContext(Dispatchers.IO) {
+        val root = File(context.filesDir, "projects/${project.id}")
+        val displayName = displayName(context, uri)
+        val extension = displayName.substringAfterLast('.', "png").lowercase().takeIf { it in imageExtensions } ?: "png"
+        val newIndex = project.pages.size + 1
+        val file = File(root, "page-${newIndex.toString().padStart(4, '0')}.$extension")
+        context.contentResolver.openInputStream(uri).use { input ->
+            requireNotNull(input) { "Unable to open image." }
+            file.outputStream().use(input::copyTo)
+        }
+        val newPage = ComicPage("page-$newIndex", displayName, Uri.fromFile(file))
+        project.copy(pages = project.pages + newPage)
+    }
+
+    suspend fun appendBlank(context: Context, project: ComicProject, colorArgb: Long?): ComicProject = withContext(Dispatchers.IO) {
+        val root = File(context.filesDir, "projects/${project.id}")
+        val newIndex = project.pages.size + 1
+        val file = File(root, "page-${newIndex.toString().padStart(4, '0')}.png")
+        
+        val bitmap = Bitmap.createBitmap(1080, 1920, Bitmap.Config.ARGB_8888)
+        Canvas(bitmap).drawColor(if (colorArgb != null) colorArgb.toInt() else android.graphics.Color.WHITE)
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        
+        val newPage = ComicPage("page-$newIndex", "Blank Page", Uri.fromFile(file))
+        project.copy(pages = project.pages + newPage)
+    }
 }

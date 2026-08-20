@@ -35,7 +35,7 @@ object ProjectExporter {
         }
     }
 
-    private fun exportImage(context: Context, project: ComicProject, name: String): Uri {
+        private fun exportImage(context: Context, project: ComicProject, name: String): Uri {
         val (uri, output) = destination(context, name, "image/png")
         output.use { stream ->
             File(requireNotNull(project.pages.single().renderedSource.path)).inputStream().use {
@@ -56,7 +56,7 @@ object ProjectExporter {
             ZipOutputStream(raw.buffered()).use { zip ->
                 project.pages.forEachIndexed { index, page ->
                     val file = File(requireNotNull(page.renderedSource.path))
-                    zip.putNextEntry(ZipEntry("page-${(index + 1).toString().padStart(4, '0')}.png"))
+                    zip.putNextEntry(ZipEntry("${(index + 1).toString().padStart(4, '0')}.png"))
                     file.inputStream().use { it.copyTo(zip) }
                     zip.closeEntry()
                 }
@@ -109,3 +109,7 @@ object ProjectExporter {
         return Uri.fromFile(file) to file.outputStream()
     }
 }
+
+
+
+

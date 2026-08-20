@@ -11,8 +11,8 @@ android {
         applicationId = "com.untrustedtranslations.android"
         minSdk = 23
         targetSdk = 36
-        versionCode = 19
-        versionName = "1.3.0"
+        versionCode = 33
+        versionName = "3.0.0"
     }
     signingConfigs {
         create("release") {
@@ -90,3 +90,4 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.0")
 }
+

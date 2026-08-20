@@ -10,7 +10,7 @@ Fair warning — the automatic passes aren't magic. OCR will miss weird letterin
 
 > You are responsible for everything you translate — and look over a page before you publish it.
 
-## A look at the app
+## A look at the app (old)
 
 | Import and projects | OCR and translation setup |
 | --- | --- |

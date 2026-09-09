@@ -1,0 +1,28 @@
+# Gradle and Android build output
+.gradle/
+**/build/
+local.properties
+
+# IDE files
+.idea/
+*.iml
+
+# Native build output
+.cxx/
+*.apk
+*.aab
+
+# OS metadata
+.DS_Store
+Thumbs.db
+keystore/
+release-artifacts/
+release-artifacts/
+keystore/release.jks
+*.log
+build/
+.cxx/
+keystore/release.jks
+*.log
+build/
+.cxx/

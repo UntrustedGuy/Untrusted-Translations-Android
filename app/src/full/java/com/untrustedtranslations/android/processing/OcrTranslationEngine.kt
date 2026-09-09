@@ -1,0 +1,517 @@
+package com.untrustedtranslations.android.processing
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Point
+import android.graphics.Rect
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.TranslatorOptions
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.Text
+import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
+import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.untrustedtranslations.android.model.ComicPage
+import com.untrustedtranslations.android.model.FontChoice
+import com.untrustedtranslations.android.model.RelativeBounds
+import com.untrustedtranslations.android.model.SourceScript
+import com.untrustedtranslations.android.model.TextBlock
+import kotlinx.coroutines.tasks.await
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+
+object OcrTranslationEngine {
+    private val recognizerCache = ConcurrentHashMap<SourceScript, TextRecognizer>()
+
+    private data class Detection(
+        val text: String,
+        val bounds: RelativeBounds,
+        val pixelBox: Rect,
+        val cornerPoints: Array<Point>?,
+        val confidence: Float,
+    )
+
+    suspend fun process(
+        context: Context,
+        page: ComicPage,
+        script: SourceScript,
+        sourceTag: String,
+        targetTag: String,
+        deepScan: Boolean = false,
+    ): List<TextBlock> {
+        val path = requireNotNull(page.originalSource.path)
+        val bitmap = requireNotNull(BitmapFactory.decodeFile(path)) { "Unable to inspect page lettering." }
+        val detectorPack = ModelPackId.COMIC_DIALOGUE_DETECTOR
+        require(ModelPackManager.isInstalled(context, detectorPack)) {
+            "Download the Comic dialogue detector first."
+        }
+        val dialogueRegions = ComicDialogueDetector.detect(
+            cacheKey = "shared_comic_dialogue_detector",
+            model = java.io.File(
+                ModelPackManager.directory(context, detectorPack),
+                "comic_dialogue_detector.onnx",
+            ),
+            bitmap = bitmap,
+            minimumScore = if (deepScan) .22f else .35f,
+            pageKey = page.originalSource.toString(),
+        )
+        val recognizer = recognizer(script)
+        val detections = try {
+            // Fast path: one normal full-page ML Kit pass. The comic detector below gates the
+            // result to dialogue, so sound effects do not trigger expensive retry work.
+            val original = recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
+            val candidates = extract(original, bitmap.width, bitmap.height, 1f).toMutableList()
+
+            if (deepScan) {
+                // The old deep scan blindly ran 4 tiles x 3 variants after the full-page pass
+                // (13 ML Kit calls total). Retry only dialogue bubbles that the fast pass missed.
+                dialogueRegions.filterNot { region ->
+                    candidates.any { detectionMatchesRegion(it.pixelBox, region.rect) }
+                }.forEach { region ->
+                    candidates += scanDialogueRegion(
+                        recognizer = recognizer,
+                        page = bitmap,
+                        region = region.rect,
+                    )
+                }
+            }
+
+            mergeDetections(candidates, bitmap.width, bitmap.height, script)
+                .filterNot { detection ->
+                    // Route through the same shared, script-aware SFX heuristic every other
+                    // engine uses -- this previously had its own separate, cruder check here
+                    // (an unconditional "1 letter = SFX" rule, plus flagging any short text
+                    // rotated more than 18 degrees as SFX regardless of script or case), which
+                    // never got the CJK fix applied elsewhere and was aggressive enough to
+                    // strip real short reactions and merely-tilted dialogue lettering. Only
+                    // detections that land in a free-text (not dialogue-bubble) region are even
+                    // considered for SFX at all; unmatched detections pass through untouched.
+                    val matchedRegion = dialogueRegions.firstOrNull {
+                        detectionMatchesRegion(detection.pixelBox, it.rect)
+                    }
+                    matchedRegion != null && matchedRegion.isFreeText &&
+                        ComicDialogueDetector.looksLikeSoundEffect(
+                            detection.text, detection.pixelBox, bitmap.width, bitmap.height,
+                            bitmap = bitmap, allRegions = dialogueRegions,
+                        )
+                }
+                
+        } finally {
+            // Recognizers are intentionally cached across pages; reopening them repeatedly
+            // can re-pay model/runtime initialization costs. There are at most four scripts.
+        }
+
+        return try {
+            val translations = translateTexts(detections.map { it.text }, sourceTag, targetTag)
+            detections.mapIndexed { index, detection ->
+                val translated = translations[index]
+                val estimated = LetteringStyleEstimator.estimate(
+                    context = context,
+                    bitmap = bitmap,
+                    box = detection.pixelBox,
+                    text = detection.text,
+                    script = script,
+                    cornerPoints = detection.cornerPoints,
+                )
+                val targetUsesVerticalWriting = targetTag == "ja" || targetTag.startsWith("zh")
+                TextBlock(
+                    id = UUID.randomUUID().toString(),
+                    originalText = detection.text,
+                    translatedText = translated,
+                    bounds = translatedBounds(
+                        source = detection.bounds,
+                        translatedText = translated,
+                        sourceWasVertical = estimated.vertical,
+                        targetUsesVerticalWriting = targetUsesVerticalWriting,
+                    ),
+                    eraseBounds = detection.bounds,
+                    style = estimated.copy(
+                        font = if (targetUsesVerticalWriting) estimated.font else FontChoice.MANGA,
+                        vertical = estimated.vertical && targetUsesVerticalWriting,
+                    ),
+                )
+            }
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private suspend fun scanDialogueRegion(
+        recognizer: TextRecognizer,
+        page: Bitmap,
+        region: Rect,
+    ): List<Detection> {
+        val cropRect = paddedCrop(region, page.width, page.height)
+        val crop = Bitmap.createBitmap(
+            page, cropRect.left, cropRect.top, cropRect.width(), cropRect.height(),
+        )
+        val scale = (1280f / maxOf(crop.width, crop.height)).coerceIn(1f, 2f)
+        val enlarged = if (scale > 1.02f) {
+            Bitmap.createScaledBitmap(
+                crop,
+                (crop.width * scale).toInt().coerceAtLeast(1),
+                (crop.height * scale).toInt().coerceAtLeast(1),
+                true,
+            )
+        } else crop
+        try {
+            val first = extract(
+                recognizer.process(InputImage.fromBitmap(enlarged, 0)).await(),
+                page.width, page.height, scale, cropRect.left, cropRect.top,
+            )
+            if (first.any { it.text.isNotBlank() && it.confidence >= .45f }) return first
+
+            val thresholded = mangaContrast(enlarged)
+            try {
+                val second = extract(
+                    recognizer.process(InputImage.fromBitmap(thresholded, 0)).await(),
+                    page.width, page.height, scale, cropRect.left, cropRect.top,
+                )
+                if (second.isNotEmpty()) return first + second
+            } finally {
+                thresholded.recycle()
+            }
+
+            val inverted = mangaContrast(enlarged, invert = true)
+            return try {
+                first + extract(
+                    recognizer.process(InputImage.fromBitmap(inverted, 0)).await(),
+                    page.width, page.height, scale, cropRect.left, cropRect.top,
+                )
+            } finally {
+                inverted.recycle()
+            }
+        } finally {
+            if (enlarged !== crop) enlarged.recycle()
+            crop.recycle()
+        }
+    }
+
+    private fun paddedCrop(rect: Rect, width: Int, height: Int): Rect {
+        val horizontalPadding = maxOf(12, rect.width() / 3)
+        val verticalPadding = maxOf(10, rect.height() / 8)
+        return Rect(
+            (rect.left - horizontalPadding).coerceAtLeast(0),
+            (rect.top - verticalPadding).coerceAtLeast(0),
+            (rect.right + horizontalPadding).coerceAtMost(width),
+            (rect.bottom + verticalPadding).coerceAtMost(height),
+        )
+    }
+
+    private fun detectionMatchesRegion(detection: Rect, region: Rect): Boolean {
+        if (region.contains(detection.centerX(), detection.centerY())) return true
+        val intersection = Rect()
+        if (!intersection.setIntersect(detection, region)) return false
+        val detectionArea = detection.width().coerceAtLeast(1).toLong() * detection.height().coerceAtLeast(1)
+        return intersection.width().toLong() * intersection.height() >= detectionArea * 3 / 10
+    }
+
+    private fun mangaContrast(source: Bitmap, invert: Boolean = false): Bitmap {
+        val width = source.width
+        val height = source.height
+        val pixels = IntArray(width * height)
+        source.getPixels(pixels, 0, width, 0, 0, width, height)
+        val luminances = IntArray(pixels.size)
+        pixels.indices.forEach { index ->
+            val color = pixels[index]
+            val red = color ushr 16 and 0xFF
+            val green = color ushr 8 and 0xFF
+            val blue = color and 0xFF
+            luminances[index] = (red * 299 + green * 587 + blue * 114) / 1000
+        }
+        val threshold = otsuThreshold(luminances)
+        pixels.indices.forEach { index ->
+            val alpha = pixels[index] ushr 24
+            val bright = luminances[index] >= threshold
+            val value = if (bright != invert) 255 else 0
+            pixels[index] = (alpha shl 24) or (value shl 16) or (value shl 8) or value
+        }
+        return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+    }
+
+    private fun otsuThreshold(luminances: IntArray): Int {
+        val histogram = IntArray(256)
+        luminances.forEach { histogram[it]++ }
+        val total = luminances.size
+        var sum = 0L
+        for (level in 0..255) sum += level.toLong() * histogram[level]
+        var sumBackground = 0L
+        var weightBackground = 0
+        var bestVariance = -1.0
+        var threshold = 127
+        for (level in 0..255) {
+            weightBackground += histogram[level]
+            if (weightBackground == 0) continue
+            val weightForeground = total - weightBackground
+            if (weightForeground == 0) break
+            sumBackground += level.toLong() * histogram[level]
+            val meanBackground = sumBackground.toDouble() / weightBackground
+            val meanForeground = (sum - sumBackground).toDouble() / weightForeground
+            val betweenVariance = weightBackground.toDouble() * weightForeground *
+                (meanBackground - meanForeground) * (meanBackground - meanForeground)
+            if (betweenVariance > bestVariance) {
+                bestVariance = betweenVariance
+                threshold = level
+            }
+        }
+        return threshold
+    }
+
+    private fun extract(
+        result: Text,
+        originalWidth: Int,
+        originalHeight: Int,
+        scale: Float,
+        offsetX: Int = 0,
+        offsetY: Int = 0,
+    ): List<Detection> = result.textBlocks.mapNotNull { block ->
+        val scaledBox = block.boundingBox ?: return@mapNotNull null
+        val text = block.text.trim()
+        if (text.isBlank()) return@mapNotNull null
+        val box = Rect(
+            ((scaledBox.left / scale).toInt() + offsetX).coerceIn(0, originalWidth - 1),
+            ((scaledBox.top / scale).toInt() + offsetY).coerceIn(0, originalHeight - 1),
+            ((scaledBox.right / scale).toInt() + offsetX).coerceIn(1, originalWidth),
+            ((scaledBox.bottom / scale).toInt() + offsetY).coerceIn(1, originalHeight),
+        )
+        if (box.width() < 2 || box.height() < 2) return@mapNotNull null
+        val confidences = block.lines.flatMap { it.elements }.map { it.confidence }.filter { it >= 0f }
+        Detection(
+            text = text,
+            bounds = RelativeBounds(
+                box.left / originalWidth.toFloat(),
+                box.top / originalHeight.toFloat(),
+                box.right / originalWidth.toFloat(),
+                box.bottom / originalHeight.toFloat(),
+            ),
+            pixelBox = box,
+            cornerPoints = block.cornerPoints?.map {
+                Point((it.x / scale).toInt() + offsetX, (it.y / scale).toInt() + offsetY)
+            }?.toTypedArray(),
+            confidence = confidences.average().takeUnless { it.isNaN() }?.toFloat() ?: 0f,
+        )
+    }
+
+    private fun tileRects(width: Int, height: Int): List<Rect> {
+        val middleX = width / 2
+        val middleY = height / 2
+        val overlapX = (width * .08f).toInt()
+        val overlapY = (height * .08f).toInt()
+        return listOf(
+            Rect(0, 0, middleX + overlapX, middleY + overlapY),
+            Rect(middleX - overlapX, 0, width, middleY + overlapY),
+            Rect(0, middleY - overlapY, middleX + overlapX, height),
+            Rect(middleX - overlapX, middleY - overlapY, width, height),
+        )
+    }
+
+    private fun mergeDetections(
+        candidates: List<Detection>,
+        pageWidth: Int,
+        pageHeight: Int,
+        script: SourceScript,
+    ): List<Detection> {
+        val merged = mutableListOf<Detection>()
+        candidates.forEach { candidate ->
+            val candidateKey = normalizedText(candidate.text)
+            val duplicate = merged.indexOfFirst { existing ->
+                overlapOverSmaller(existing.pixelBox, candidate.pixelBox) >= .45f ||
+                    (candidateKey.length >= 4 && candidateKey == normalizedText(existing.text))
+            }
+            if (duplicate < 0) {
+                merged += candidate
+            } else {
+                val existing = merged[duplicate]
+                val existingLength = existing.text.count { !it.isWhitespace() }
+                val candidateLength = candidate.text.count { !it.isWhitespace() }
+                val relatedText = textsAreRelated(existing.text, candidate.text)
+                val isMoreComplete = relatedText && candidateLength >= existingLength + 2 &&
+                    candidateLength >= (existingLength * 1.25f)
+                val isMoreConfident = relatedText && candidate.confidence >= existing.confidence + .18f &&
+                    candidateLength >= existingLength
+                if (isMoreComplete || isMoreConfident) merged[duplicate] = candidate
+            }
+        }
+        val grouped = mergeNeighbors(merged, pageWidth, pageHeight, script)
+        return if (script == SourceScript.JAPANESE) {
+            grouped.sortedWith(compareByDescending<Detection> { it.pixelBox.right }.thenBy { it.pixelBox.top })
+        } else {
+            grouped.sortedWith(compareBy<Detection> { it.pixelBox.top }.thenBy { it.pixelBox.left })
+        }
+    }
+
+    /** Joins line/column fragments conservatively before SFX filtering and translation. */
+    private fun mergeNeighbors(
+        detections: List<Detection>,
+        pageWidth: Int,
+        pageHeight: Int,
+        script: SourceScript,
+    ): List<Detection> {
+        val pool = detections.toMutableList()
+        var changed = true
+        while (changed) {
+            changed = false
+            outer@ for (i in pool.indices) {
+                for (j in i + 1 until pool.size) {
+                    val a = pool[i]
+                    val b = pool[j]
+                    if (!areSameBubbleFragments(a.pixelBox, b.pixelBox, script)) continue
+                    val ordered = if (script == SourceScript.JAPANESE) {
+                        if (a.pixelBox.centerX() >= b.pixelBox.centerX()) listOf(a, b) else listOf(b, a)
+                    } else {
+                        if (a.pixelBox.top <= b.pixelBox.top) listOf(a, b) else listOf(b, a)
+                    }
+                    val box = Rect(
+                        minOf(a.pixelBox.left, b.pixelBox.left),
+                        minOf(a.pixelBox.top, b.pixelBox.top),
+                        maxOf(a.pixelBox.right, b.pixelBox.right),
+                        maxOf(a.pixelBox.bottom, b.pixelBox.bottom),
+                    )
+                    val separator = if (script == SourceScript.JAPANESE || script == SourceScript.CHINESE) "" else " "
+                    pool[i] = Detection(
+                        text = ordered.joinToString(separator) { it.text }.trim(),
+                        bounds = RelativeBounds(
+                            box.left / pageWidth.toFloat(), box.top / pageHeight.toFloat(),
+                            box.right / pageWidth.toFloat(), box.bottom / pageHeight.toFloat(),
+                        ),
+                        pixelBox = box,
+                        cornerPoints = null,
+                        confidence = minOf(a.confidence, b.confidence),
+                    )
+                    pool.removeAt(j)
+                    changed = true
+                    break@outer
+                }
+            }
+        }
+        return pool
+    }
+
+    private fun areSameBubbleFragments(first: Rect, second: Rect, script: SourceScript): Boolean {
+        if (script == SourceScript.JAPANESE) {
+            val overlap = minOf(first.bottom, second.bottom) - maxOf(first.top, second.top)
+            val smallerHeight = minOf(first.height(), second.height()).coerceAtLeast(1)
+            val smallerWidth = minOf(first.width(), second.width()).coerceAtLeast(1)
+            val gap = if (first.left <= second.left) second.left - first.right else first.left - second.right
+            val heightRatio = maxOf(first.height(), second.height()).toFloat() / smallerHeight
+            return overlap.toFloat() / smallerHeight > .65f &&
+                gap >= -smallerWidth * .25f && gap < smallerWidth * .55f && heightRatio < 2f
+        }
+        val overlap = minOf(first.right, second.right) - maxOf(first.left, second.left)
+        val smallerWidth = minOf(first.width(), second.width()).coerceAtLeast(1)
+        val smallerHeight = minOf(first.height(), second.height()).coerceAtLeast(1)
+        val gap = if (first.top <= second.top) second.top - first.bottom else first.top - second.bottom
+        val widthRatio = maxOf(first.width(), second.width()).toFloat() / smallerWidth
+        return overlap.toFloat() / smallerWidth > .7f &&
+            gap >= -smallerHeight * .25f && gap < smallerHeight * .45f && widthRatio < 2.5f
+    }
+    private fun normalizedText(value: String): String = value.lowercase().filter { it.isLetterOrDigit() }
+
+    private fun textsAreRelated(first: String, second: String): Boolean {
+        val firstKey = normalizedText(first)
+        val secondKey = normalizedText(second)
+        if (firstKey.isBlank() || secondKey.isBlank()) return false
+        if (firstKey in secondKey || secondKey in firstKey) return true
+        val firstCharacters = firstKey.toSet()
+        val secondCharacters = secondKey.toSet()
+        val smallerSize = minOf(firstCharacters.size, secondCharacters.size).coerceAtLeast(1)
+        val shared = firstCharacters.intersect(secondCharacters).size
+        return shared.toFloat() / smallerSize >= .6f
+    }
+
+    private fun overlapOverSmaller(first: Rect, second: Rect): Float {
+        val intersectionWidth = (minOf(first.right, second.right) - maxOf(first.left, second.left)).coerceAtLeast(0)
+        val intersectionHeight = (minOf(first.bottom, second.bottom) - maxOf(first.top, second.top)).coerceAtLeast(0)
+        val intersection = intersectionWidth.toLong() * intersectionHeight
+        val smaller = minOf(first.width().toLong() * first.height(), second.width().toLong() * second.height())
+        return if (smaller <= 0L) 0f else intersection.toFloat() / smaller
+    }
+
+    private fun translatedBounds(
+        source: RelativeBounds,
+        translatedText: String,
+        sourceWasVertical: Boolean,
+        targetUsesVerticalWriting: Boolean,
+    ): RelativeBounds {
+        if (targetUsesVerticalWriting) return source
+        val characters = translatedText.count { !it.isWhitespace() }.coerceAtLeast(1)
+        val lines = ((characters + 17) / 18).coerceAtLeast(1)
+        val sourceWidth = source.right - source.left
+        val sourceHeight = source.bottom - source.top
+        val desiredWidth = maxOf(
+            sourceWidth * if (sourceWasVertical) 3.2f else 1.4f,
+            (.10f + characters * .007f).coerceAtMost(.45f),
+        ).coerceIn(.08f, .5f)
+        val desiredHeight = maxOf(
+            sourceHeight * if (sourceWasVertical) .9f else 1.3f,
+            .055f * lines,
+        ).coerceIn(.05f, .32f)
+        val centerX = (source.left + source.right) / 2f
+        val centerY = (source.top + source.bottom) / 2f
+        val left = (centerX - desiredWidth / 2f).coerceIn(0f, 1f - desiredWidth)
+        val top = (centerY - desiredHeight / 2f).coerceIn(0f, 1f - desiredHeight)
+        return RelativeBounds(left, top, left + desiredWidth, top + desiredHeight)
+    }
+
+    private suspend fun translateTexts(texts: List<String>, sourceTag: String, targetTag: String): List<String> {
+        if (sourceTag == targetTag) return texts
+        val source = requireNotNull(TranslateLanguage.fromLanguageTag(sourceTag)) {
+            "Unsupported source language: $sourceTag"
+        }
+        val target = requireNotNull(TranslateLanguage.fromLanguageTag(targetTag)) {
+            "Unsupported target language: $targetTag"
+        }
+        val translator = Translation.getClient(
+            TranslatorOptions.Builder()
+                .setSourceLanguage(source)
+                .setTargetLanguage(target)
+                .build(),
+        )
+        return try {
+            translator.downloadModelIfNeeded(DownloadConditions.Builder().build()).await()
+            texts.map { text ->
+                if (text.isBlank()) text else translator.translate(text).await()
+            }
+        } finally {
+            translator.close()
+        }
+    }
+
+    suspend fun translateText(text: String, sourceTag: String, targetTag: String): String {
+        if (text.isBlank() || sourceTag == targetTag) return text
+        val source = requireNotNull(TranslateLanguage.fromLanguageTag(sourceTag)) {
+            "Unsupported source language: $sourceTag"
+        }
+        val target = requireNotNull(TranslateLanguage.fromLanguageTag(targetTag)) {
+            "Unsupported target language: $targetTag"
+        }
+        val translator = Translation.getClient(
+            TranslatorOptions.Builder()
+                .setSourceLanguage(source)
+                .setTargetLanguage(target)
+                .build(),
+        )
+        return try {
+            translator.downloadModelIfNeeded(DownloadConditions.Builder().build()).await()
+            translator.translate(text).await()
+        } finally {
+            translator.close()
+        }
+    }
+
+    private fun recognizer(script: SourceScript): TextRecognizer =
+        recognizerCache.getOrPut(script) {
+            when (script) {
+                SourceScript.JAPANESE -> TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
+                SourceScript.KOREAN -> TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+                SourceScript.CHINESE -> TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+                SourceScript.LATIN -> TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+            }
+        }
+}
